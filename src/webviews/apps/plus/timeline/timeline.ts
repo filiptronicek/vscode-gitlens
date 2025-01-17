@@ -1,177 +1,247 @@
-'use strict';
-/*global*/
 import './timeline.scss';
-import { provideVSCodeDesignSystem, vsCodeButton, vsCodeDropdown, vsCodeOption } from '@vscode/webview-ui-toolkit';
-import {
-	DidChangeStateNotificationType,
-	OpenDataPointCommandType,
-	State,
-	UpdatePeriodCommandType,
-} from '../../../../plus/webviews/timeline/protocol';
-import { SubscriptionPlanId, SubscriptionState } from '../../../../subscription';
-import { ExecuteCommandType, IpcMessage, onIpc } from '../../../protocol';
-import { App } from '../../shared/appBase';
-import { DOM } from '../../shared/dom';
-import { DataPointClickEvent, TimelineChart } from './chart';
+import type { PropertyValues } from 'lit';
+import { html, LitElement, nothing } from 'lit';
+import { customElement, query, state } from 'lit/decorators.js';
+import { isSubscriptionPaid } from '../../../../plus/gk/account/subscription';
+import type { Period, State } from '../../../plus/timeline/protocol';
+import { OpenDataPointCommand, UpdatePeriodCommand } from '../../../plus/timeline/protocol';
+import { GlApp } from '../../shared/app';
+import type { HostIpc } from '../../shared/ipc';
+import type { DataPointClickEventDetail, GlTimelineChart } from './components/chart';
+import { TimelineStateProvider } from './stateProvider';
+import { timelineBaseStyles, timelineStyles } from './timeline.css';
+import './components/chart';
+import '../../shared/components/feature-gate';
+import '../../shared/components/feature-badge';
+import '../../shared/components/code-icon';
+import '../../shared/components/progress';
 
-export class TimelineApp extends App<State> {
-	private _chart: TimelineChart | undefined;
+@customElement('gl-timeline-app')
+export class GlTimelineApp extends GlApp<State> {
+	static override shadowRootOptions: ShadowRootInit = {
+		...LitElement.shadowRootOptions,
+		delegatesFocus: true,
+	};
 
-	constructor() {
-		super('TimelineApp');
+	static override styles = [timelineBaseStyles, timelineStyles];
+
+	@query('#chart')
+	private _chart?: GlTimelineChart;
+
+	protected override createStateProvider(state: State, ipc: HostIpc) {
+		return new TimelineStateProvider(this, state, ipc);
+	}
+	protected override onPersistState(state: State) {
+		this._ipc.setState({ period: state.period, uri: state.uri });
 	}
 
-	protected override onInitialize() {
-		provideVSCodeDesignSystem().register({
-			register: function (container: any, context: any) {
-				vsCodeButton().register(container, context);
-				vsCodeDropdown().register(container, context);
-				vsCodeOption().register(container, context);
-			},
-		});
+	override connectedCallback(): void {
+		super.connectedCallback();
 
-		this.updateState();
+		document.addEventListener('keydown', this.onDocumentKeyDown);
 	}
 
-	protected override onBind() {
-		const disposables = super.onBind?.() ?? [];
+	override disconnectedCallback(): void {
+		document.removeEventListener('keydown', this.onDocumentKeyDown);
 
-		disposables.push(
-			DOM.on('[data-action]', 'click', (e, target: HTMLElement) => this.onActionClicked(e, target)),
-			DOM.on(document, 'keydown', (e: KeyboardEvent) => this.onKeyDown(e)),
-			DOM.on(document.getElementById('periods')! as HTMLSelectElement, 'change', (e, target) =>
-				this.onPeriodChanged(e, target),
-			),
-		);
-
-		return disposables;
+		super.disconnectedCallback();
 	}
 
-	protected override onMessageReceived(e: MessageEvent) {
-		const msg = e.data as IpcMessage;
+	get allowed() {
+		return this.state.access?.allowed ?? false;
+	}
 
-		switch (msg.method) {
-			case DidChangeStateNotificationType.method:
-				this.log(`${this.appName}.onMessageReceived(${msg.id}): name=${msg.method}`);
+	get header() {
+		let title = this.state.title;
+		let description;
 
-				onIpc(DidChangeStateNotificationType, msg, params => {
-					this.state = params.state;
-					this.updateState();
-				});
-				break;
-
-			default:
-				super.onMessageReceived?.(e);
+		if (title != null) {
+			const index = title.lastIndexOf('/');
+			if (index >= 0) {
+				const name = title.substring(index + 1);
+				description = title.substring(0, index);
+				title = name;
+			}
 		}
+
+		return { title: title ?? '', description: description ?? '' };
 	}
 
-	private onActionClicked(e: MouseEvent, target: HTMLElement) {
-		const action = target.dataset.action;
-		if (action?.startsWith('command:')) {
-			this.sendCommand(ExecuteCommandType, { command: action.slice(8) });
+	@state()
+	private _loading = true;
+	get loading() {
+		return this.state.dataset != null && this.uri != null && this._loading;
+	}
+
+	get period() {
+		return this.state.period;
+	}
+
+	get subscription() {
+		return this.state.access?.subscription?.current;
+	}
+
+	get sha() {
+		return this.state.sha;
+	}
+
+	get uri() {
+		return this.state.uri;
+	}
+
+	get uriType() {
+		return this.state.uriType;
+	}
+
+	@state()
+	private _zoomed = false;
+	get zoomed() {
+		return this._zoomed;
+	}
+
+	protected override willUpdate(changedProperties: PropertyValues): void {
+		if (!changedProperties.has('_loading') && !changedProperties.has('_zoomed')) {
+			this._loading = Boolean(this.state.dataset && this.uri);
 		}
+
+		super.willUpdate(changedProperties);
 	}
 
-	private onChartDataPointClicked(e: DataPointClickEvent) {
-		this.sendCommand(OpenDataPointCommandType, e);
+	override render() {
+		return html`
+			${this.allowed
+				? html`<gl-feature-gate
+						.source=${{ source: 'timeline' as const, detail: 'gate' }}
+						.state=${this.subscription?.state}
+				  ></gl-feature-gate>`
+				: nothing}
+			<div class="container">
+				<progress-indicator ?active=${this.loading}></progress-indicator>
+				<header class="header" ?hidden=${!this.uri}>
+					<span class="details">
+						<span class="details__title"
+							><code-icon icon="${this.uriType === 'folder' ? 'folder' : 'file'}"></code-icon
+							>&nbsp;&nbsp;${this.header.title}</span
+						>
+						<span class="details__description">${this.header.description}</span>
+						<span class="details__sha">
+							${this.sha
+								? html`<code-icon icon="git-commit" size="16"></code-icon
+										><span class="sha">${this.sha}</span>`
+								: nothing}
+						</span>
+					</span>
+					<span class="toolbox">
+						${this.zoomed
+							? html`<gl-button
+									appearance="toolbar"
+									@click=${(e: MouseEvent) =>
+										e.shiftKey || e.altKey ? this._chart?.reset() : this._chart?.zoom(-1)}
+									aria-label="Zoom Out"
+							  >
+									<code-icon icon="zoom-out"></code-icon>
+									<span slot="tooltip">Zoom Out<br />[Alt] Reset Zoom</span>
+							  </gl-button>`
+							: nothing}
+						<gl-button
+							appearance="toolbar"
+							@click=${() => this._chart?.zoom(0.5)}
+							tooltip="Zoom In"
+							aria-label="Zoom In"
+						>
+							<code-icon icon="zoom-in"></code-icon>
+						</gl-button>
+						<span class="select-container">
+							<label for="periods">Timeframe</label>
+							<select
+								class="period"
+								name="periods"
+								position="below"
+								.value=${this.period}
+								@change=${this.onPeriodChanged}
+							>
+								<option value="7|D" ?selected=${this.period === '7|D'}>1 week</option>
+								<option value="1|M" ?selected=${this.period === '1|M'}>1 month</option>
+								<option value="3|M" ?selected=${this.period === '3|M'}>3 months</option>
+								<option value="6|M" ?selected=${this.period === '6|M'}>6 months</option>
+								<option value="9|M" ?selected=${this.period === '9|M'}>9 months</option>
+								<option value="1|Y" ?selected=${this.period === '1|Y'}>1 year</option>
+								<option value="2|Y" ?selected=${this.period === '2|Y'}>2 years</option>
+								<option value="4|Y" ?selected=${this.period === '4|Y'}>4 years</option>
+								<option value="all" ?selected=${this.period === 'all'}>Full history</option>
+							</select>
+						</span>
+						${this.placement === 'view'
+							? html`<gl-button
+									appearance="toolbar"
+									href="command:gitlens.views.timeline.openInTab"
+									tooltip="Open in Editor"
+									aria-label="Open in Editor"
+							  >
+									<code-icon icon="link-external"></code-icon>
+							  </gl-button>`
+							: nothing}
+						${this.subscription == null || !isSubscriptionPaid(this.subscription)
+							? html`<gl-feature-badge
+									placement="bottom"
+									.source=${{ source: 'timeline' as const, detail: 'badge' }}
+									.subscription=${this.subscription}
+							  ></gl-feature-badge>`
+							: nothing}
+					</span>
+				</header>
+
+				<main class="timeline">${this.renderChart()}</main>
+			</div>
+		`;
 	}
 
-	private onKeyDown(e: KeyboardEvent) {
+	private renderChart() {
+		if (!this.uri || !this.state.dataset) {
+			return html`<div class="timeline__empty">
+				<p>There are no editors open that can provide file history information.</p>
+			</div>`;
+		}
+
+		return html`<gl-timeline-chart
+			id="chart"
+			placement="${this.placement}"
+			dateFormat="${this.state.dateFormat}"
+			shortDateFormat="${this.state.shortDateFormat}"
+			.dataPromise=${this.state.dataset}
+			@gl-data-point-click=${this.onChartDataPointClicked}
+			@gl-load=${() => (this._loading = false)}
+			@gl-zoomed=${(e: CustomEvent<boolean>) => (this._zoomed = e.detail)}
+		>
+		</gl-timeline-chart>`;
+	}
+
+	private onChartDataPointClicked(e: CustomEvent<DataPointClickEventDetail>) {
+		this._ipc.sendCommand(OpenDataPointCommand, e.detail);
+	}
+
+	private onDocumentKeyDown = (e: KeyboardEvent) => {
 		if (e.key === 'Escape' || e.key === 'Esc') {
 			this._chart?.reset();
 		}
-	}
+	};
 
-	private onPeriodChanged(e: Event, element: HTMLSelectElement) {
+	private onPeriodChanged(e: Event) {
+		const element = e.target as HTMLSelectElement;
 		const value = element.options[element.selectedIndex].value;
 		assertPeriod(value);
 
-		this.log(`${this.appName}.onPeriodChanged: name=${element.name}, value=${value}`);
+		// this.log(`onPeriodChanged(): name=${element.name}, value=${value}`);
 
-		this.sendCommand(UpdatePeriodCommandType, { period: value });
-	}
-
-	private updateState(): void {
-		const $overlay = document.getElementById('overlay') as HTMLDivElement;
-		$overlay.classList.toggle('hidden', this.state.access.allowed);
-
-		const $slot = document.getElementById('overlay-slot') as HTMLDivElement;
-
-		if (!this.state.access.allowed) {
-			const { current: subscription, required } = this.state.access.subscription;
-
-			const requiresPublic = required === SubscriptionPlanId.FreePlus;
-			const options = { visible: { public: requiresPublic, private: !requiresPublic } };
-
-			if (subscription.account?.verified === false) {
-				DOM.insertTemplate('state:verify-email', $slot, options);
-				return;
-			}
-
-			switch (subscription.state) {
-				case SubscriptionState.Free:
-					DOM.insertTemplate('state:free', $slot, options);
-					break;
-				case SubscriptionState.FreePreviewExpired:
-					DOM.insertTemplate('state:free-preview-expired', $slot, options);
-					break;
-				case SubscriptionState.FreePlusTrialExpired:
-					DOM.insertTemplate('state:plus-trial-expired', $slot, options);
-					break;
-			}
-
-			if (this.state.dataset == null) return;
-		} else {
-			$slot.innerHTML = '';
-		}
-
-		if (this._chart == null) {
-			this._chart = new TimelineChart('#chart');
-			this._chart.onDidClickDataPoint(this.onChartDataPointClicked, this);
-		}
-
-		let { title } = this.state;
-
-		const empty = this.state.dataset == null || this.state.dataset.length === 0;
-		if (empty) {
-			title = '';
-		}
-
-		let description = '';
-		const index = title.lastIndexOf('/');
-		if (index >= 0) {
-			const name = title.substring(index + 1);
-			description = title.substring(0, index);
-			title = name;
-		}
-
-		for (const [key, value] of Object.entries({ title: title, description: description })) {
-			const $el = document.querySelector(`[data-bind="${key}"]`);
-			if ($el != null) {
-				$el.textContent = String(value);
-			}
-		}
-
-		const $periods = document.getElementById('periods') as HTMLSelectElement;
-		if ($periods != null) {
-			const period = this.state?.period;
-			for (let i = 0, len = $periods.options.length; i < len; ++i) {
-				if ($periods.options[i].value === period) {
-					$periods.selectedIndex = i;
-					break;
-				}
-			}
-		}
-
-		this._chart.updateChart(this.state);
+		this._ipc.sendCommand(UpdatePeriodCommand, { period: value });
 	}
 }
 
-function assertPeriod(period: string): asserts period is `${number}|${'D' | 'M' | 'Y'}` {
+function assertPeriod(period: string): asserts period is Period {
+	if (period === 'all') return;
+
 	const [value, unit] = period.split('|');
 	if (isNaN(Number(value)) || (unit !== 'D' && unit !== 'M' && unit !== 'Y')) {
 		throw new Error(`Invalid period: ${period}`);
 	}
 }
-
-new TimelineApp();

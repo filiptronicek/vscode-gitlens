@@ -1,21 +1,27 @@
-import { commands, ConfigurationChangeEvent, Disposable } from 'vscode';
-import { configuration, LineHistoryViewConfig } from '../configuration';
-import { Commands, ContextKeys } from '../constants';
-import { Container } from '../container';
-import { setContext } from '../context';
-import { executeCommand } from '../system/command';
-import { LineHistoryTrackerNode } from './nodes';
+import type { ConfigurationChangeEvent, Disposable } from 'vscode';
+import type { LineHistoryViewConfig } from '../config';
+import { GlCommand } from '../constants.commands';
+import type { Container } from '../container';
+import { executeCommand } from '../system/vscode/command';
+import { configuration } from '../system/vscode/configuration';
+import { setContext } from '../system/vscode/context';
+import { LineHistoryTrackerNode } from './nodes/lineHistoryTrackerNode';
 import { ViewBase } from './viewBase';
+import { registerViewCommand } from './viewCommands';
 
 const pinnedSuffix = ' (pinned)';
 
-export class LineHistoryView extends ViewBase<LineHistoryTrackerNode, LineHistoryViewConfig> {
+export class LineHistoryView extends ViewBase<'lineHistory', LineHistoryTrackerNode, LineHistoryViewConfig> {
 	protected readonly configKey = 'lineHistory';
 
 	constructor(container: Container) {
-		super('gitlens.views.lineHistory', 'Line History', container);
+		super(container, 'lineHistory', 'Line History', 'lineHistoryView');
 
-		void setContext(ContextKeys.ViewsLineHistoryEditorFollowing, true);
+		void setContext('gitlens:views:lineHistory:editorFollowing', true);
+	}
+
+	override get canSelectMany(): boolean {
+		return this.container.prereleaseOrDebugging;
 	}
 
 	protected override get showCollapseAll(): boolean {
@@ -27,36 +33,26 @@ export class LineHistoryView extends ViewBase<LineHistoryTrackerNode, LineHistor
 	}
 
 	protected registerCommands(): Disposable[] {
-		void this.container.viewCommands;
-
 		return [
-			commands.registerCommand(
+			registerViewCommand(
 				this.getQualifiedCommand('copy'),
-				() => executeCommand(Commands.ViewsCopy, this.selection),
+				() => executeCommand(GlCommand.ViewsCopy, this.activeSelection, this.selection),
 				this,
 			),
-			commands.registerCommand(this.getQualifiedCommand('refresh'), () => this.refresh(true), this),
-			commands.registerCommand(this.getQualifiedCommand('changeBase'), () => this.changeBase(), this),
-			commands.registerCommand(
+			registerViewCommand(this.getQualifiedCommand('refresh'), () => this.refresh(true), this),
+			registerViewCommand(this.getQualifiedCommand('changeBase'), () => this.changeBase(), this),
+			registerViewCommand(
 				this.getQualifiedCommand('setEditorFollowingOn'),
 				() => this.setEditorFollowing(true),
 				this,
 			),
-			commands.registerCommand(
+			registerViewCommand(
 				this.getQualifiedCommand('setEditorFollowingOff'),
 				() => this.setEditorFollowing(false),
 				this,
 			),
-			commands.registerCommand(
-				this.getQualifiedCommand('setShowAvatarsOn'),
-				() => this.setShowAvatars(true),
-				this,
-			),
-			commands.registerCommand(
-				this.getQualifiedCommand('setShowAvatarsOff'),
-				() => this.setShowAvatars(false),
-				this,
-			),
+			registerViewCommand(this.getQualifiedCommand('setShowAvatarsOn'), () => this.setShowAvatars(true), this),
+			registerViewCommand(this.getQualifiedCommand('setShowAvatarsOff'), () => this.setShowAvatars(false), this),
 		];
 	}
 
@@ -86,13 +82,13 @@ export class LineHistoryView extends ViewBase<LineHistoryTrackerNode, LineHistor
 		const root = this.ensureRoot();
 		if (!root.hasUri) return;
 
-		void setContext(ContextKeys.ViewsLineHistoryEditorFollowing, enabled);
+		void setContext('gitlens:views:lineHistory:editorFollowing', enabled);
 
 		this.root?.setEditorFollowing(enabled);
 
 		if (this.description?.endsWith(pinnedSuffix)) {
 			if (enabled) {
-				this.description = this.description.substr(0, this.description.length - pinnedSuffix.length);
+				this.description = this.description.substring(0, this.description.length - pinnedSuffix.length);
 			}
 		} else if (!enabled && this.description != null) {
 			this.description += pinnedSuffix;

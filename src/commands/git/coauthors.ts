@@ -1,18 +1,12 @@
-import { CoreCommands } from '../../constants';
 import type { Container } from '../../container';
-import type { GitContributor, Repository } from '../../git/models';
-import { executeCoreCommand } from '../../system/command';
+import type { GitContributor } from '../../git/models/contributor';
+import type { Repository } from '../../git/models/repository';
 import { normalizePath } from '../../system/path';
-import { ViewsWithRepositoryFolders } from '../../views/viewBase';
-import {
-	PartialStepState,
-	pickContributorsStep,
-	pickRepositoryStep,
-	QuickCommand,
-	StepGenerator,
-	StepResult,
-	StepState,
-} from '../quickCommand';
+import { executeCoreCommand } from '../../system/vscode/command';
+import type { ViewsWithRepositoryFolders } from '../../views/viewBase';
+import type { PartialStepState, StepGenerator, StepState } from '../quickCommand';
+import { endSteps, QuickCommand, StepResultBreak } from '../quickCommand';
+import { pickContributorsStep, pickRepositoryStep } from '../quickCommand.steps';
 
 interface Context {
 	repos: Repository[];
@@ -70,7 +64,7 @@ export class CoAuthorsGitCommand extends QuickCommand<State> {
 
 		const index = message.indexOf('Co-authored-by: ');
 		if (index !== -1) {
-			message = message.substring(0, index - 1).trimRight();
+			message = message.substring(0, index - 1).trimEnd();
 		}
 
 		if (state.contributors != null && !Array.isArray(state.contributors)) {
@@ -91,14 +85,14 @@ export class CoAuthorsGitCommand extends QuickCommand<State> {
 		}
 
 		repo.inputBox.value = message;
-		void (await executeCoreCommand(CoreCommands.ShowSCM));
+		void (await executeCoreCommand('workbench.view.scm'));
 	}
 
 	protected async *steps(state: PartialStepState<State>): StepGenerator {
 		const context: Context = {
 			repos: this.container.git.openRepositories,
 			activeRepo: undefined,
-			associatedView: this.container.contributorsView,
+			associatedView: this.container.views.contributors,
 			title: this.title,
 		};
 
@@ -136,7 +130,7 @@ export class CoAuthorsGitCommand extends QuickCommand<State> {
 				} else {
 					const result = yield* pickRepositoryStep(state, context);
 					// Always break on the first step (so we will go back)
-					if (result === StepResult.Break) break;
+					if (result === StepResultBreak) break;
 
 					state.repo = result;
 				}
@@ -148,7 +142,7 @@ export class CoAuthorsGitCommand extends QuickCommand<State> {
 					context,
 					'Choose contributors to add as co-authors',
 				);
-				if (result === StepResult.Break) {
+				if (result === StepResultBreak) {
 					// If we skipped the previous step, make sure we back up past it
 					if (skippedStepOne) {
 						state.counter--;
@@ -160,10 +154,10 @@ export class CoAuthorsGitCommand extends QuickCommand<State> {
 				state.contributors = result;
 			}
 
-			QuickCommand.endSteps(state);
+			endSteps(state);
 			void this.execute(state as CoAuthorStepState);
 		}
 
-		return state.counter < 0 ? StepResult.Break : undefined;
+		return state.counter < 0 ? StepResultBreak : undefined;
 	}
 }

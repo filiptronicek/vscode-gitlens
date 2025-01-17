@@ -1,9 +1,11 @@
-import { Range, Uri } from 'vscode';
-import { DynamicAutolinkReference } from '../../annotations/autolinks';
-import { AutolinkReference } from '../../config';
-import { GitRevision } from '../models';
-import { Repository } from '../models/repository';
-import { RemoteProvider } from './provider';
+import type { Range, Uri } from 'vscode';
+import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks';
+import type { GkProviderId } from '../../gk/models/repositoryIdentities';
+import type { Brand, Unbrand } from '../../system/brand';
+import type { Repository } from '../models/repository';
+import { isSha } from '../models/revision.utils';
+import type { RemoteProviderId } from './remoteProvider';
+import { RemoteProvider } from './remoteProvider';
 
 const fileRegex = /^\/([^/]+)\/([^/]+?)\/src(.+)$/i;
 const rangeRegex = /^lines-(\d+)(?::(\d+))?$/;
@@ -13,20 +15,34 @@ export class BitbucketServerRemote extends RemoteProvider {
 		super(domain, path, protocol, name, custom);
 	}
 
+	protected override get issueLinkPattern(): string {
+		return `${this.baseUrl}/issues/<num>`;
+	}
+
 	private _autolinks: (AutolinkReference | DynamicAutolinkReference)[] | undefined;
 	override get autolinks(): (AutolinkReference | DynamicAutolinkReference)[] {
 		if (this._autolinks === undefined) {
 			this._autolinks = [
+				...super.autolinks,
 				{
 					prefix: 'issue #',
-					url: `${this.baseUrl}/issues/<num>`,
+					url: this.issueLinkPattern,
+					alphanumeric: false,
+					ignoreCase: true,
 					title: `Open Issue #<num> on ${this.name}`,
+
+					type: 'issue',
+					description: `${this.name} Issue #<num>`,
 				},
 				{
 					prefix: 'pull request #',
+					alphanumeric: false,
 					ignoreCase: true,
 					url: `${this.baseUrl}/pull-requests/<num>`,
-					title: `Open PR #<num> on ${this.name}`,
+					title: `Open Pull Request #<num> on ${this.name}`,
+
+					type: 'pullrequest',
+					description: `${this.name} Pull Request #<num>`,
 				},
 			];
 		}
@@ -34,18 +50,30 @@ export class BitbucketServerRemote extends RemoteProvider {
 	}
 
 	protected override get baseUrl(): string {
-		const [project, repo] = this.path.startsWith('scm/')
-			? this.path.replace('scm/', '').split('/')
-			: this.splitPath();
+		const [project, repo] = this.splitPath();
 		return `${this.protocol}://${this.domain}/projects/${project}/repos/${repo}`;
+	}
+
+	protected override splitPath(): [string, string] {
+		if (this.path.startsWith('scm/')) {
+			const path = this.path.replace('scm/', '');
+			const index = path.indexOf('/');
+			return [this.path.substring(0, index), this.path.substring(index + 1)];
+		}
+
+		return super.splitPath();
 	}
 
 	override get icon() {
 		return 'bitbucket';
 	}
 
-	get id() {
+	get id(): RemoteProviderId {
 		return 'bitbucket-server';
+	}
+
+	get gkProviderId(): GkProviderId {
+		return 'bitbucketServer' satisfies Unbrand<GkProviderId> as Brand<GkProviderId>;
 	}
 
 	get name() {
@@ -84,8 +112,8 @@ export class BitbucketServerRemote extends RemoteProvider {
 		let index = path.indexOf('/', 1);
 		if (index !== -1) {
 			const sha = path.substring(1, index);
-			if (GitRevision.isSha(sha)) {
-				const uri = repository.toAbsoluteUri(path.substr(index), { validate: options?.validate });
+			if (isSha(sha)) {
+				const uri = repository.toAbsoluteUri(path.substring(index), { validate: options?.validate });
 				if (uri != null) return { uri: uri, startLine: startLine, endLine: endLine };
 			}
 		}
@@ -98,11 +126,11 @@ export class BitbucketServerRemote extends RemoteProvider {
 			index = path.lastIndexOf('/', index - 1);
 			branch = path.substring(1, index);
 
-			possibleBranches.set(branch, path.substr(index));
+			possibleBranches.set(branch, path.substring(index));
 		} while (index > 0);
 
 		if (possibleBranches.size !== 0) {
-			const { values: branches } = await repository.getBranches({
+			const { values: branches } = await repository.git.branches().getBranches({
 				filter: b => b.remote && possibleBranches.has(b.getNameWithoutRemote()),
 			});
 			for (const branch of branches) {

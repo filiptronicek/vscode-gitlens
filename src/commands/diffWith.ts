@@ -1,12 +1,19 @@
-import { Range, TextDocumentShowOptions, Uri, ViewColumn } from 'vscode';
-import { Commands, CoreCommands, GlyphChars } from '../constants';
+import type { TextDocumentShowOptions, Uri } from 'vscode';
+import { Range, ViewColumn } from 'vscode';
+import { GlyphChars } from '../constants';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { GitCommit, GitRevision } from '../git/models';
-import { Logger } from '../logger';
-import { Messages } from '../messages';
-import { command, executeCoreCommand } from '../system/command';
+import type { GitCommit } from '../git/models/commit';
+import { isCommit } from '../git/models/commit';
+import { deletedOrMissing } from '../git/models/revision';
+import { isShaLike, isUncommitted, shortenRevision } from '../git/models/revision.utils';
+import { showGenericErrorMessage } from '../messages';
+import { createMarkdownCommandLink } from '../system/commands';
+import { Logger } from '../system/logger';
 import { basename } from '../system/path';
-import { Command } from './base';
+import { command } from '../system/vscode/command';
+import { openDiffEditor } from '../system/vscode/utils';
+import { GlCommandBase } from './base';
 
 export interface DiffWithCommandArgsRevision {
 	sha: string;
@@ -24,12 +31,12 @@ export interface DiffWithCommandArgs {
 }
 
 @command()
-export class DiffWithCommand extends Command {
-	static getMarkdownCommandArgs(args: DiffWithCommandArgs): string;
-	static getMarkdownCommandArgs(commit: GitCommit, line?: number): string;
-	static getMarkdownCommandArgs(argsOrCommit: DiffWithCommandArgs | GitCommit, line?: number): string {
+export class DiffWithCommand extends GlCommandBase {
+	static createMarkdownCommandLink(args: DiffWithCommandArgs): string;
+	static createMarkdownCommandLink(commit: GitCommit, line?: number): string;
+	static createMarkdownCommandLink(argsOrCommit: DiffWithCommandArgs | GitCommit, line?: number): string {
 		let args: DiffWithCommandArgs | GitCommit;
-		if (GitCommit.is(argsOrCommit)) {
+		if (isCommit(argsOrCommit)) {
 			const commit = argsOrCommit;
 			if (commit.file == null || commit.unresolvedPreviousSha == null) {
 				debugger;
@@ -53,6 +60,7 @@ export class DiffWithCommand extends Command {
 				args = {
 					repoPath: commit.repoPath,
 					lhs: {
+						// Don't need to worry about verifying the previous sha, as the DiffWith command will
 						sha: commit.unresolvedPreviousSha,
 						uri: commit.file.originalUri ?? commit.file.uri,
 					},
@@ -67,11 +75,11 @@ export class DiffWithCommand extends Command {
 			args = argsOrCommit;
 		}
 
-		return super.getMarkdownCommandArgsCore<DiffWithCommandArgs>(Commands.DiffWith, args);
+		return createMarkdownCommandLink<DiffWithCommandArgs>(GlCommand.DiffWith, args);
 	}
 
 	constructor(private readonly container: Container) {
-		super(Commands.DiffWith);
+		super(GlCommand.DiffWith);
 	}
 
 	async execute(args?: DiffWithCommandArgs): Promise<any> {
@@ -93,19 +101,19 @@ export class DiffWithCommand extends Command {
 			[args.lhs.sha, args.rhs.sha] = await Promise.all([
 				await this.container.git.resolveReference(args.repoPath, args.lhs.sha, args.lhs.uri, {
 					// If the ref looks like a sha, don't wait too long, since it should work
-					timeout: GitRevision.isSha(args.lhs.sha) ? 100 : undefined,
+					timeout: isShaLike(args.lhs.sha) ? 100 : undefined,
 				}),
 				await this.container.git.resolveReference(args.repoPath, args.rhs.sha, args.rhs.uri, {
 					// If the ref looks like a sha, don't wait too long, since it should work
-					timeout: GitRevision.isSha(args.rhs.sha) ? 100 : undefined,
+					timeout: isShaLike(args.rhs.sha) ? 100 : undefined,
 				}),
 			]);
 
-			if (args.lhs.sha !== GitRevision.deletedOrMissing) {
+			if (args.lhs.sha !== deletedOrMissing) {
 				lhsSha = args.lhs.sha;
 			}
 
-			if (args.rhs.sha && args.rhs.sha !== GitRevision.deletedOrMissing) {
+			if (args.rhs.sha && args.rhs.sha !== deletedOrMissing) {
 				// Ensure that the file still exists in this commit
 				const status = await this.container.git.getFileStatusForCommit(
 					args.repoPath,
@@ -113,13 +121,13 @@ export class DiffWithCommand extends Command {
 					args.rhs.sha,
 				);
 				if (status?.status === 'D') {
-					args.rhs.sha = GitRevision.deletedOrMissing;
+					args.rhs.sha = deletedOrMissing;
 				} else {
 					rhsSha = args.rhs.sha;
 				}
 
 				if (status?.status === 'A' && args.lhs.sha.endsWith('^')) {
-					args.lhs.sha = GitRevision.deletedOrMissing;
+					args.lhs.sha = deletedOrMissing;
 				}
 			}
 
@@ -128,11 +136,11 @@ export class DiffWithCommand extends Command {
 				this.container.git.getBestRevisionUri(args.repoPath, args.rhs.uri.fsPath, args.rhs.sha),
 			]);
 
-			let rhsSuffix = GitRevision.shorten(rhsSha, { strings: { uncommitted: 'Working Tree' } });
+			let rhsSuffix = shortenRevision(rhsSha, { strings: { uncommitted: 'Working Tree' } });
 			if (rhs == null) {
-				if (GitRevision.isUncommitted(args.rhs.sha)) {
+				if (isUncommitted(args.rhs.sha)) {
 					rhsSuffix = 'deleted';
-				} else if (rhsSuffix.length === 0 && args.rhs.sha === GitRevision.deletedOrMissing) {
+				} else if (rhsSuffix.length === 0 && args.rhs.sha === deletedOrMissing) {
 					rhsSuffix = 'not in Working Tree';
 				} else {
 					rhsSuffix = `deleted${rhsSuffix.length === 0 ? '' : ` in ${rhsSuffix}`}`;
@@ -141,7 +149,7 @@ export class DiffWithCommand extends Command {
 				rhsSuffix = `added${rhsSuffix.length === 0 ? '' : ` in ${rhsSuffix}`}`;
 			}
 
-			let lhsSuffix = args.lhs.sha !== GitRevision.deletedOrMissing ? GitRevision.shorten(lhsSha) : '';
+			let lhsSuffix = args.lhs.sha !== deletedOrMissing ? shortenRevision(lhsSha) : '';
 			if (lhs == null && args.rhs.sha.length === 0) {
 				if (rhs != null) {
 					lhsSuffix = lhsSuffix.length === 0 ? '' : `not in ${lhsSuffix}`;
@@ -175,18 +183,15 @@ export class DiffWithCommand extends Command {
 				args.showOptions.selection = new Range(args.line, 0, args.line, 0);
 			}
 
-			void (await executeCoreCommand(
-				CoreCommands.Diff,
-				lhs ??
-					this.container.git.getRevisionUri(GitRevision.deletedOrMissing, args.lhs.uri.fsPath, args.repoPath),
-				rhs ??
-					this.container.git.getRevisionUri(GitRevision.deletedOrMissing, args.rhs.uri.fsPath, args.repoPath),
+			await openDiffEditor(
+				lhs ?? this.container.git.getRevisionUri(deletedOrMissing, args.lhs.uri.fsPath, args.repoPath),
+				rhs ?? this.container.git.getRevisionUri(deletedOrMissing, args.rhs.uri.fsPath, args.repoPath),
 				title,
 				args.showOptions,
-			));
+			);
 		} catch (ex) {
 			Logger.error(ex, 'DiffWithCommand', 'getVersionedFile');
-			void Messages.showGenericErrorMessage('Unable to open compare');
+			void showGenericErrorMessage('Unable to open compare');
 		}
 	}
 }

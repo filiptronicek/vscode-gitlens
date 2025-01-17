@@ -1,14 +1,15 @@
-import { TextEditor, Uri } from 'vscode';
-import { GitActions } from '../commands/gitCommands.actions';
-import { Commands } from '../constants';
+import type { TextEditor, Uri } from 'vscode';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { Logger } from '../logger';
-import { Messages } from '../messages';
-import { ReferencePicker } from '../quickpicks/referencePicker';
-import { RepositoryPicker } from '../quickpicks/repositoryPicker';
-import { command } from '../system/command';
-import { CompareResultsNode } from '../views/nodes';
-import { ActiveEditorCommand, CommandContext, getCommandUri, isCommandContextViewNodeHasRef } from './base';
+import { openDirectoryCompare } from '../git/actions/commit';
+import { showGenericErrorMessage } from '../messages';
+import { showReferencePicker } from '../quickpicks/referencePicker';
+import { getBestRepositoryOrShowPicker } from '../quickpicks/repositoryPicker';
+import { Logger } from '../system/logger';
+import { command } from '../system/vscode/command';
+import { CompareResultsNode } from '../views/nodes/compareResultsNode';
+import type { CommandContext } from './base';
+import { ActiveEditorCommand, getCommandUri, isCommandContextViewNodeHasRef } from './base';
 
 export interface OpenDirectoryCompareCommandArgs {
 	ref1?: string;
@@ -19,33 +20,33 @@ export interface OpenDirectoryCompareCommandArgs {
 export class OpenDirectoryCompareCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
 		super([
-			Commands.DiffDirectory,
-			Commands.DiffDirectoryWithHead,
-			Commands.ViewsOpenDirectoryDiff,
-			Commands.ViewsOpenDirectoryDiffWithWorking,
+			GlCommand.DiffDirectory,
+			GlCommand.DiffDirectoryWithHead,
+			GlCommand.ViewsOpenDirectoryDiff,
+			GlCommand.ViewsOpenDirectoryDiffWithWorking,
 		]);
 	}
 
 	protected override async preExecute(context: CommandContext, args?: OpenDirectoryCompareCommandArgs) {
 		switch (context.command) {
-			case Commands.DiffDirectoryWithHead:
+			case GlCommand.DiffDirectoryWithHead:
 				args = { ...args };
 				args.ref1 = 'HEAD';
 				args.ref2 = undefined;
 				break;
 
-			case Commands.ViewsOpenDirectoryDiff:
+			case GlCommand.ViewsOpenDirectoryDiff:
 				if (context.type === 'viewItem' && context.node instanceof CompareResultsNode) {
 					args = { ...args };
 					[args.ref1, args.ref2] = await context.node.getDiffRefs();
 				}
 				break;
 
-			case Commands.ViewsOpenDirectoryDiffWithWorking:
+			case GlCommand.ViewsOpenDirectoryDiffWithWorking:
 				if (isCommandContextViewNodeHasRef(context)) {
 					args = { ...args };
 					args.ref1 = context.node.ref.ref;
-					args.ref2 = undefined;
+					args.ref2 = '';
 				}
 				break;
 		}
@@ -58,19 +59,17 @@ export class OpenDirectoryCompareCommand extends ActiveEditorCommand {
 		args = { ...args };
 
 		try {
-			const repoPath = (
-				await RepositoryPicker.getBestRepositoryOrShow(uri, editor, 'Directory Compare Working Tree With')
-			)?.path;
+			const repoPath = (await getBestRepositoryOrShowPicker(uri, editor, 'Directory Compare Working Tree With'))
+				?.path;
 			if (!repoPath) return;
 
 			if (!args.ref1) {
-				const pick = await ReferencePicker.show(
+				const pick = await showReferencePicker(
 					repoPath,
 					'Directory Compare Working Tree with',
 					'Choose a branch or tag to compare with',
 					{
-						allowEnteringRefs: true,
-						// checkmarks: false,
+						allowRevisions: true,
 					},
 				);
 				if (pick == null) return;
@@ -79,10 +78,10 @@ export class OpenDirectoryCompareCommand extends ActiveEditorCommand {
 				if (args.ref1 == null) return;
 			}
 
-			void GitActions.Commit.openDirectoryCompare(repoPath, args.ref1, args.ref2);
+			void openDirectoryCompare(repoPath, args.ref1, args.ref2);
 		} catch (ex) {
 			Logger.error(ex, 'OpenDirectoryCompareCommand');
-			void Messages.showGenericErrorMessage('Unable to open directory compare');
+			void showGenericErrorMessage('Unable to open directory compare');
 		}
 	}
 }

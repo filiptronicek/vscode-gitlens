@@ -1,28 +1,34 @@
-import { executeGitCommand } from '../commands/gitCommands.actions';
-import { Commands } from '../constants';
+import { GlCommand } from '../constants.commands';
+import type { SearchQuery } from '../constants.search';
 import type { Container } from '../container';
-import { SearchPattern } from '../git/search';
-import { command } from '../system/command';
-import { SearchResultsNode } from '../views/nodes';
-import { Command, CommandContext, isCommandContextViewNodeHasRepository } from './base';
+import { executeGitCommand } from '../git/actions';
+import { command } from '../system/vscode/command';
+import { configuration } from '../system/vscode/configuration';
+import { SearchResultsNode } from '../views/nodes/searchResultsNode';
+import type { CommandContext } from './base';
+import { GlCommandBase, isCommandContextViewNodeHasRepository } from './base';
 
 export interface SearchCommitsCommandArgs {
-	search?: Partial<SearchPattern>;
+	search?: Partial<SearchQuery>;
 	repoPath?: string;
 
 	prefillOnly?: boolean;
 
+	openPickInView?: boolean;
 	showResultsInSideBar?: boolean;
 }
 
 @command()
-export class SearchCommitsCommand extends Command {
+export class SearchCommitsCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super([Commands.SearchCommits, Commands.SearchCommitsInView]);
+		super([GlCommand.SearchCommits, GlCommand.SearchCommitsInView]);
 	}
 
 	protected override preExecute(context: CommandContext, args?: SearchCommitsCommandArgs) {
-		if (context.type === 'viewItem') {
+		if (context.command === GlCommand.SearchCommitsInView) {
+			args = { ...args };
+			args.showResultsInSideBar = true;
+		} else if (context.type === 'viewItem') {
 			args = { ...args };
 			args.showResultsInSideBar = true;
 
@@ -35,24 +41,22 @@ export class SearchCommitsCommand extends Command {
 			if (isCommandContextViewNodeHasRepository(context)) {
 				args.repoPath = context.node.repo.path;
 			}
-		} else if (context.command === Commands.SearchCommitsInView) {
-			args = { ...args };
-			args.showResultsInSideBar = true;
 		}
 
 		return this.execute(args);
 	}
 
 	async execute(args?: SearchCommitsCommandArgs) {
-		void (await executeGitCommand({
+		await executeGitCommand({
 			command: 'search',
 			prefillOnly: args?.prefillOnly,
 			state: {
 				repo: args?.repoPath,
 				...args?.search,
 				showResultsInSideBar:
-					this.container.config.gitCommands.search.showResultsInSideBar ?? args?.showResultsInSideBar,
+					configuration.get('gitCommands.search.showResultsInSideBar') ?? args?.showResultsInSideBar,
+				openPickInView: args?.openPickInView ?? false,
 			},
-		}));
+		});
 	}
 }

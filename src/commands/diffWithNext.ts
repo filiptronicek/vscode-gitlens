@@ -1,13 +1,14 @@
-import { Range, TextDocumentShowOptions, TextEditor, Uri } from 'vscode';
-import { Commands } from '../constants';
+import type { Range, TextDocumentShowOptions, TextEditor, Uri } from 'vscode';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { GitUri } from '../git/gitUri';
-import { GitCommit } from '../git/models';
-import { Logger } from '../logger';
-import { Messages } from '../messages';
-import { command, executeCommand } from '../system/command';
-import { ActiveEditorCommand, CommandContext, getCommandUri } from './base';
-import { DiffWithCommandArgs } from './diffWith';
+import type { GitCommit } from '../git/models/commit';
+import { showGenericErrorMessage } from '../messages';
+import { Logger } from '../system/logger';
+import { command, executeCommand } from '../system/vscode/command';
+import type { CommandContext } from './base';
+import { ActiveEditorCommand, getCommandUri } from './base';
+import type { DiffWithCommandArgs } from './diffWith';
 
 export interface DiffWithNextCommandArgs {
 	commit?: GitCommit;
@@ -21,11 +22,11 @@ export interface DiffWithNextCommandArgs {
 @command()
 export class DiffWithNextCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super([Commands.DiffWithNext, Commands.DiffWithNextInDiffLeft, Commands.DiffWithNextInDiffRight]);
+		super([GlCommand.DiffWithNext, GlCommand.DiffWithNextInDiffLeft, GlCommand.DiffWithNextInDiffRight]);
 	}
 
 	protected override preExecute(context: CommandContext, args?: DiffWithNextCommandArgs) {
-		if (context.command === Commands.DiffWithNextInDiffLeft) {
+		if (context.command === GlCommand.DiffWithNextInDiffLeft) {
 			args = { ...args, inDiffLeftEditor: true };
 		}
 
@@ -51,9 +52,9 @@ export class DiffWithNextCommand extends ActiveEditorCommand {
 				args.inDiffLeftEditor ? 1 : 0,
 			);
 
-			if (diffUris == null || diffUris.next == null) return;
+			if (diffUris?.next == null) return;
 
-			void (await executeCommand<DiffWithCommandArgs>(Commands.DiffWith, {
+			void (await executeCommand<DiffWithCommandArgs>(GlCommand.DiffWith, {
 				repoPath: diffUris.current.repoPath,
 				lhs: {
 					sha: diffUris.current.sha ?? '',
@@ -72,7 +73,7 @@ export class DiffWithNextCommand extends ActiveEditorCommand {
 				'DiffWithNextCommand',
 				`getNextDiffUris(${gitUri.repoPath}, ${gitUri.fsPath}, ${gitUri.sha})`,
 			);
-			void Messages.showGenericErrorMessage('Unable to open compare');
+			void showGenericErrorMessage('Unable to open compare');
 		}
 	}
 }

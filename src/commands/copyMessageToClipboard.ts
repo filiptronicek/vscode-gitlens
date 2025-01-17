@@ -1,30 +1,32 @@
-import { env, TextEditor, Uri } from 'vscode';
-import { Commands } from '../constants';
+import type { TextEditor, Uri } from 'vscode';
+import { env } from 'vscode';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
+import { copyMessageToClipboard } from '../git/actions/commit';
 import { GitUri } from '../git/gitUri';
-import { Logger } from '../logger';
-import { Messages } from '../messages';
-import { command } from '../system/command';
+import { showGenericErrorMessage } from '../messages';
 import { first } from '../system/iterable';
+import { Logger } from '../system/logger';
+import { command } from '../system/vscode/command';
+import type { CommandContext } from './base';
 import {
 	ActiveEditorCommand,
-	CommandContext,
 	getCommandUri,
 	isCommandContextViewNodeHasBranch,
 	isCommandContextViewNodeHasCommit,
 	isCommandContextViewNodeHasTag,
 } from './base';
-import { GitActions } from './gitCommands.actions';
 
 export interface CopyMessageToClipboardCommandArgs {
 	message?: string;
 	sha?: string;
+	repoPath?: string;
 }
 
 @command()
 export class CopyMessageToClipboardCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super(Commands.CopyMessageToClipboard);
+		super(GlCommand.CopyMessageToClipboard);
 	}
 
 	protected override async preExecute(context: CommandContext, args?: CopyMessageToClipboardCommandArgs) {
@@ -59,6 +61,11 @@ export class CopyMessageToClipboardCommand extends ActiveEditorCommand {
 
 		try {
 			if (!args.message) {
+				if (args.repoPath != null && args.sha != null) {
+					await copyMessageToClipboard({ ref: args.sha, repoPath: args.repoPath });
+					return;
+				}
+
 				let repoPath;
 
 				// If we don't have an editor then get the message of the last commit to the branch
@@ -76,6 +83,7 @@ export class CopyMessageToClipboardCommand extends ActiveEditorCommand {
 				} else if (args.message == null) {
 					const gitUri = await GitUri.fromUri(uri);
 					repoPath = gitUri.repoPath;
+					if (!repoPath) return;
 
 					if (args.sha == null) {
 						const blameline = editor?.selection.active.line ?? 0;
@@ -85,25 +93,25 @@ export class CopyMessageToClipboardCommand extends ActiveEditorCommand {
 							const blame = await this.container.git.getBlameForLine(gitUri, blameline, editor?.document);
 							if (blame == null || blame.commit.isUncommitted) return;
 
-							void (await GitActions.Commit.copyMessageToClipboard(blame.commit));
+							await copyMessageToClipboard(blame.commit);
 							return;
 						} catch (ex) {
 							Logger.error(ex, 'CopyMessageToClipboardCommand', `getBlameForLine(${blameline})`);
-							void Messages.showGenericErrorMessage('Unable to copy message');
+							void showGenericErrorMessage('Unable to copy message');
 
 							return;
 						}
 					} else {
-						void (await GitActions.Commit.copyMessageToClipboard({ ref: args.sha, repoPath: repoPath! }));
+						await copyMessageToClipboard({ ref: args.sha, repoPath: repoPath });
 						return;
 					}
 				}
 			}
 
-			void (await env.clipboard.writeText(args.message));
+			await env.clipboard.writeText(args.message);
 		} catch (ex) {
 			Logger.error(ex, 'CopyMessageToClipboardCommand');
-			void Messages.showGenericErrorMessage('Unable to copy message');
+			void showGenericErrorMessage('Unable to copy message');
 		}
 	}
 }

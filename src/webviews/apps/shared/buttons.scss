@@ -1,3 +1,5 @@
+@use '../shared/styles/utils';
+
 .button {
 	background: none;
 	border: none;
@@ -37,29 +39,37 @@
 	}
 }
 
+.button--compact {
+	padding: 0.6em 1em;
+}
+
 .button--big {
 	font-size: 1.5rem;
 }
 
 .button--flat {
-	.vscode-light & {
+	transition:
+		background-color 250ms,
+		border-color 250ms,
+		color 250ms;
+
+	@include utils.light-theme($selectorPostfix: ' &') {
 		border: 1px solid rgba(0, 0, 0, 0.6);
 		color: black;
 	}
-	.vscode-dark & {
+	@include utils.dark-theme($selectorPostfix: ' &') {
 		border: 1px solid rgba(255, 255, 255, 0.6);
 		color: white;
 	}
-	transition: background-color 250ms, border-color 250ms, color 250ms;
 
 	&:not([disabled]):hover,
 	&:not([disabled]):focus {
-		.vscode-light & {
+		@include utils.light-theme($selectorPostfix: ' &') {
 			background-color: var(--color-button-background--darken-30);
 			border-color: var(--color-button-background--darken-30);
 			color: white;
 		}
-		.vscode-dark & {
+		@include utils.dark-theme($selectorPostfix: ' &') {
 			background-color: white;
 			border-color: white;
 			color: black;
@@ -76,7 +86,10 @@
 	border: 1px solid white;
 	color: black;
 	font-weight: 600;
-	transition: background-color 250ms, border-color 250ms, color 250ms;
+	transition:
+		background-color 250ms,
+		border-color 250ms,
+		color 250ms;
 
 	&:not([disabled]):hover,
 	&:not([disabled]):focus {
@@ -95,17 +108,20 @@
 	border: 1px solid var(--color-button-background);
 	color: var(--color-button-foreground);
 	font-weight: 600;
-	transition: background-color 250ms, border-color 250ms, color 250ms;
+	transition:
+		background-color 250ms,
+		border-color 250ms,
+		color 250ms;
 
 	&:not([disabled]):hover,
 	&:not([disabled]):focus {
-		.vscode-dark & {
+		@include utils.dark-theme($selectorPostfix: ' &') {
 			background-color: white;
 			border-color: white;
 			color: black;
 		}
 
-		.vscode-light & {
+		@include utils.light-theme($selectorPostfix: ' &') {
 			background-color: var(--color-button-background--darken-30);
 			border-color: var(--color-button-background--darken-30);
 			color: white;
@@ -120,22 +136,25 @@
 .button--flat-secondary {
 	background-color: var(--color-button-secondary-background);
 	border: 1px solid var(--color-button-secondary-background);
-	color: var(--color-button-foreground);
+	color: var(--vscode-button-secondaryForeground);
 	font-weight: 600;
-	transition: background-color 250ms, border-color 250ms, color 250ms;
+	transition:
+		background-color 250ms,
+		border-color 250ms,
+		color 250ms;
 
 	&:not([disabled]):hover,
 	&:not([disabled]):focus {
-		.vscode-dark & {
+		@include utils.dark-theme($selectorPostfix: ' &') {
 			background-color: white;
 			border-color: white;
 			color: black;
 		}
 
-		.vscode-light & {
+		@include utils.light-theme($selectorPostfix: ' &') {
 			background-color: var(--color-button-secondary-background--darken-30);
 			border-color: var(--color-button-secondary-background--darken-30);
-			color: white;
+			color: var(--vscode-button-secondaryForeground);
 		}
 	}
 
@@ -145,24 +164,28 @@
 }
 
 .button--flat-subtle {
-	.vscode-light & {
+	transition:
+		background-color 250ms,
+		border-color 250ms,
+		color 250ms;
+
+	@include utils.light-theme($selectorPostfix: ' &') {
 		border: 1px solid rgba(0, 0, 0, 0.2);
 		color: rgba(0, 0, 0, 0.6);
 	}
-	.vscode-dark & {
+	@include utils.dark-theme($selectorPostfix: ' &') {
 		border: 1px solid rgba(255, 255, 255, 0.2);
 		color: rgba(255, 255, 255, 0.6);
 	}
-	transition: background-color 250ms, border-color 250ms, color 250ms;
 
 	&:not([disabled]):hover,
 	&:not([disabled]):focus {
-		.vscode-light & {
+		@include utils.light-theme($selectorPostfix: ' &') {
 			background-color: var(--color-button-secondary-background--darken-30);
 			border-color: var(--color-button-secondary-background--darken-30);
 			color: white;
 		}
-		.vscode-dark & {
+		@include utils.dark-theme($selectorPostfix: ' &') {
 			background-color: white;
 			border-color: white;
 			color: black;

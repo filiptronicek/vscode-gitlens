@@ -1,38 +1,26 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-	</head>
-
-	<body class="preload">
-		<div id="container" class="container">
-			<div class="content">
-				<section id="slot1"></section>
-				<section id="slot2"></section>
-				<section id="slot3"></section>
-			</div>
-			<div>
-				<section id="slot-footer"></section>
-			</div>
-		</div>
-		#{endOfBody}
 		<style nonce="#{cspNonce}">
 			@font-face {
 				font-family: 'codicon';
-				src: url('#{webroot}/codicon.ttf?404cbc4fe3a64b9a93064eef76704c79') format('truetype');
+				font-display: block;
+				src: url('#{webroot}/codicon.ttf?79130123c9d3674a686cf03962523e8a') format('truetype');
+			}
+			@font-face {
+				font-family: 'glicons';
+				font-display: block;
+				src: url('#{root}/dist/glicons.woff2?888557bf00e2cc234c92d4643f1f0051') format('woff2');
 			}
 		</style>
-	</body>
+	</head>
 
-	<!-- prettier-ignore -->
-	<%= require('html-loader?{"esModule":false}!./partials/welcome.html') %>
-	<%= require('html-loader?{"esModule":false}!./partials/views.html') %>
-	<%= require('html-loader?{"esModule":false}!./partials/links.html') %>
-	<%= require('html-loader?{"esModule":false}!./partials/state.free.html') %>
-	<%= require('html-loader?{"esModule":false}!./partials/state.free-preview.html') %>
-	<%= require('html-loader?{"esModule":false}!./partials/state.free-preview-expired.html') %>
-	<%= require('html-loader?{"esModule":false}!./partials/state.plus-trial.html') %>
-	<%= require('html-loader?{"esModule":false}!./partials/state.plus-trial-expired.html') %>
-	<%= require('html-loader?{"esModule":false}!./partials/state.paid.html') %>
-	<%= require('html-loader?{"esModule":false}!./partials/state.verify-email.html') %>
+	<body
+		class="preload"
+		data-placement="#{placement}"
+		data-vscode-context='{ "webview": "#{webviewId}", "webviewInstance": "#{webviewInstanceId}" }'
+	>
+		<gl-home-app name="HomeView" placement="#{placement}" bootstrap="#{state}"></gl-home-app>
+	</body>
 </html>

@@ -1,175 +1,79 @@
 /*global*/
 import './home.scss';
-import { provideVSCodeDesignSystem, vsCodeButton } from '@vscode/webview-ui-toolkit';
-import { Disposable } from 'vscode';
-import { getSubscriptionTimeRemaining, SubscriptionState } from '../../../subscription';
-import { CompletedActions, DidChangeSubscriptionNotificationType, State } from '../../home/protocol';
-import { ExecuteCommandType, IpcMessage, onIpc } from '../../protocol';
-import { App } from '../shared/appBase';
-import { DOM } from '../shared/dom';
+import { provide } from '@lit/context';
+import { html } from 'lit';
+import { customElement, query } from 'lit/decorators.js';
+import { when } from 'lit/directives/when.js';
+import type { State } from '../../home/protocol';
+import { DidFocusAccount } from '../../home/protocol';
+import { OverviewState, overviewStateContext } from '../plus/home/components/overviewState';
+import type { GLHomeHeader } from '../plus/shared/components/home-header';
+import { GlApp } from '../shared/app';
+import { scrollableBase } from '../shared/components/styles/lit/base.css';
+import type { HostIpc } from '../shared/ipc';
+import { homeBaseStyles, homeStyles } from './home.css';
+import { HomeStateProvider } from './stateProvider';
+import '../plus/shared/components/home-header';
+import '../plus/home/components/active-work';
+import '../plus/home/components/launchpad';
+import '../plus/home/components/overview';
+import './components/feature-nav';
+import './components/integration-banner';
+import './components/preview-banner';
+import './components/promo-banner';
+import './components/repo-alerts';
 
-export class HomeApp extends App<State> {
-	private $slots!: HTMLElement[];
-	private $footer!: HTMLElement;
+@customElement('gl-home-app')
+export class GlHomeApp extends GlApp<State> {
+	static override styles = [homeBaseStyles, scrollableBase, homeStyles];
 
-	constructor() {
-		super('HomeApp');
+	@provide({ context: overviewStateContext })
+	private _overviewState!: OverviewState;
+
+	@query('gl-home-header')
+	private _header!: GLHomeHeader;
+
+	private badgeSource = { source: 'home', detail: 'badge' };
+
+	protected override createStateProvider(state: State, ipc: HostIpc) {
+		this.disposables.push((this._overviewState = new OverviewState(ipc)));
+
+		return new HomeStateProvider(this, state, ipc);
 	}
 
-	protected override onInitialize() {
-		provideVSCodeDesignSystem().register({
-			register: function (container: any, context: any) {
-				vsCodeButton().register(container, context);
-			},
-		});
+	override connectedCallback(): void {
+		super.connectedCallback();
 
-		this.$slots = [
-			document.getElementById('slot1') as HTMLDivElement,
-			document.getElementById('slot2') as HTMLDivElement,
-			document.getElementById('slot3') as HTMLDivElement,
-		];
-		this.$footer = document.getElementById('slot-footer') as HTMLDivElement;
-
-		this.updateState();
-	}
-
-	protected override onBind(): Disposable[] {
-		const disposables = super.onBind?.() ?? [];
-
-		disposables.push(DOM.on('[data-action]', 'click', (e, target: HTMLElement) => this.onActionClicked(e, target)));
-
-		return disposables;
-	}
-
-	protected override onMessageReceived(e: MessageEvent) {
-		const msg = e.data as IpcMessage;
-
-		switch (msg.method) {
-			case DidChangeSubscriptionNotificationType.method:
-				this.log(`${this.appName}.onMessageReceived(${msg.id}): name=${msg.method}`);
-
-				onIpc(DidChangeSubscriptionNotificationType, msg, params => {
-					this.state = params;
-					this.updateState();
-				});
-				break;
-
-			default:
-				super.onMessageReceived?.(e);
-				break;
-		}
-	}
-
-	private onActionClicked(e: MouseEvent, target: HTMLElement) {
-		const action = target.dataset.action;
-		if (action?.startsWith('command:')) {
-			this.sendCommand(ExecuteCommandType, { command: action.slice(8) });
-		}
-	}
-
-	private updateState() {
-		const { subscription, completedActions } = this.state;
-
-		const viewsVisible = !completedActions.includes(CompletedActions.OpenedSCM);
-		const welcomeVisible = !completedActions.includes(CompletedActions.DismissedWelcome);
-
-		let index = 0;
-
-		if (subscription.account?.verified === false) {
-			DOM.insertTemplate('state:verify-email', this.$slots[index++]);
-			DOM.insertTemplate(welcomeVisible ? 'welcome' : 'links', this.$slots[index++]);
-		} else {
-			switch (subscription.state) {
-				case SubscriptionState.Free:
-					if (welcomeVisible) {
-						DOM.insertTemplate('welcome', this.$slots[index++]);
-						DOM.resetSlot(this.$footer);
-					} else {
-						DOM.insertTemplate('links', this.$footer);
-					}
-
-					if (viewsVisible) {
-						DOM.insertTemplate('views', this.$slots[index++]);
-					}
-
-					DOM.insertTemplate('state:free', this.$slots[index++]);
-
-					break;
-				case SubscriptionState.FreeInPreview: {
-					if (viewsVisible) {
-						DOM.insertTemplate('views', this.$slots[index++]);
-					}
-
-					const remaining = getSubscriptionTimeRemaining(subscription, 'days') ?? 0;
-					DOM.insertTemplate('state:free-preview', this.$slots[index++], {
-						bindings: {
-							previewDays: `${remaining === 1 ? `${remaining} day` : `${remaining} days`}`,
-						},
-					});
-
-					break;
+		this.disposables.push(
+			this._ipc.onReceiveMessage(msg => {
+				switch (true) {
+					case DidFocusAccount.is(msg):
+						this._header.show();
+						break;
 				}
-				case SubscriptionState.FreePreviewExpired:
-					if (viewsVisible) {
-						DOM.insertTemplate('views', this.$slots[index++]);
-					}
+			}),
+		);
+	}
 
-					DOM.insertTemplate('state:free-preview-expired', this.$slots[index++]);
-
-					break;
-				case SubscriptionState.FreePlusInTrial: {
-					if (viewsVisible) {
-						DOM.insertTemplate('views', this.$slots[index++]);
-					}
-
-					const remaining = getSubscriptionTimeRemaining(subscription, 'days') ?? 0;
-					DOM.insertTemplate('state:plus-trial', this.$slots[index++], {
-						bindings: {
-							plan: subscription.plan.effective.name,
-							trialDays: `${remaining === 1 ? `${remaining} day` : `${remaining} days`}`,
-						},
-					});
-
-					break;
-				}
-				case SubscriptionState.FreePlusTrialExpired:
-					if (viewsVisible) {
-						DOM.insertTemplate('views', this.$slots[index++]);
-					}
-
-					DOM.insertTemplate('state:plus-trial-expired', this.$slots[index++]);
-
-					break;
-				case SubscriptionState.Paid:
-					if (viewsVisible) {
-						DOM.insertTemplate('views', this.$slots[index++]);
-					}
-
-					DOM.insertTemplate('state:paid', this.$slots[index++], {
-						bindings: { plan: subscription.plan.effective.name },
-					});
-
-					break;
-			}
-
-			if (subscription.state !== SubscriptionState.Free) {
-				if (welcomeVisible) {
-					DOM.insertTemplate('welcome', this.$slots[index++]);
-					DOM.resetSlot(this.$footer);
-				} else {
-					DOM.insertTemplate('links', this.$footer);
-				}
-			}
-		}
-
-		for (let i = 1; i < index; i++) {
-			this.$slots[i].classList.add('divider');
-		}
-
-		for (let i = index; i < this.$slots.length; i++) {
-			DOM.resetSlot(this.$slots[i]);
-		}
+	override render() {
+		return html`
+			<div class="home scrollable">
+				<gl-home-header class="home__header"></gl-home-header>
+				${when(!this.state?.previewEnabled, () => html`<gl-preview-banner></gl-preview-banner>`)}
+				<gl-repo-alerts class="home__alerts"></gl-repo-alerts>
+				<main class="home__main scrollable" id="main">
+					${when(
+						this.state?.previewEnabled === true,
+						() => html`
+							<gl-preview-banner></gl-preview-banner>
+							<gl-active-work></gl-active-work>
+							<gl-launchpad></gl-launchpad>
+							<gl-overview></gl-overview>
+						`,
+						() => html`<gl-feature-nav .badgeSource=${this.badgeSource}></gl-feature-nav>`,
+					)}
+				</main>
+			</div>
+		`;
 	}
 }
-
-new HomeApp();

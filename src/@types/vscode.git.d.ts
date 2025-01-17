@@ -3,9 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Disposable, Event, ProviderResult, Uri } from 'vscode';
-
-import { GitErrorCodes, RefType, Status } from '../@types/vscode.git.enums';
+import { Disposable, Event, ProviderResult, Uri, Command } from 'vscode';
+import { GitErrorCodes, RefType, Status, ForcePushMode } from '../@types/vscode.git.enums';
 
 export interface Git {
 	readonly path: string;
@@ -94,6 +93,10 @@ export interface LogOptions {
 	/** Max number of log entries to retrieve. If not specified, the default is 32. */
 	readonly maxEntries?: number;
 	readonly path?: string;
+	/** A commit range, such as "0a47c67f0fb52dd11562af48658bc1dff1d75a38..0bb4bdea78e1db44d728fd6894720071e303304f" */
+	readonly range?: string;
+	readonly reverse?: boolean;
+	readonly sortByAuthorDate?: boolean;
 }
 
 export interface CommitOptions {
@@ -102,13 +105,40 @@ export interface CommitOptions {
 	signoff?: boolean;
 	signCommit?: boolean;
 	empty?: boolean;
+	noVerify?: boolean;
+	requireUserConfig?: boolean;
+	useEditor?: boolean;
+	verbose?: boolean;
+	/**
+	 * string    - execute the specified command after the commit operation
+	 * undefined - execute the command specified in git.postCommitCommand
+	 *             after the commit operation
+	 * null      - do not execute any command after the commit operation
+	 */
+	postCommitCommand?: string | null;
 }
 
-export interface BranchQuery {
-	readonly remote?: boolean;
-	readonly pattern?: string;
-	readonly count?: number;
+export interface FetchOptions {
+	remote?: string;
+	ref?: string;
+	all?: boolean;
+	prune?: boolean;
+	depth?: number;
+}
+
+export interface InitOptions {
+	defaultBranch?: string;
+}
+
+export interface RefQuery {
 	readonly contains?: string;
+	readonly count?: number;
+	readonly pattern?: string;
+	readonly sort?: 'alphabetically' | 'committerdate';
+}
+
+export interface BranchQuery extends RefQuery {
+	readonly remote?: boolean;
 }
 
 export interface Repository {
@@ -128,6 +158,8 @@ export interface Repository {
 	show(ref: string, path: string): Promise<string>;
 	getCommit(ref: string): Promise<Commit>;
 
+	add(paths: string[]): Promise<void>;
+	revert(paths: string[]): Promise<void>;
 	clean(paths: string[]): Promise<void>;
 
 	apply(patch: string, reverse?: boolean): Promise<void>;
@@ -149,10 +181,16 @@ export interface Repository {
 	createBranch(name: string, checkout: boolean, ref?: string): Promise<void>;
 	deleteBranch(name: string, force?: boolean): Promise<void>;
 	getBranch(name: string): Promise<Branch>;
-	getBranches(query: BranchQuery): Promise<Ref[]>;
+	getBranches(query: BranchQuery, cancellationToken?: CancellationToken): Promise<Ref[]>;
+	getBranchBase(name: string): Promise<Branch | undefined>;
 	setBranchUpstream(name: string, upstream: string): Promise<void>;
 
+	getRefs(query: RefQuery, cancellationToken?: CancellationToken): Promise<Ref[]>;
+
 	getMergeBase(ref1: string, ref2: string): Promise<string>;
+
+	tag(name: string, upstream: string): Promise<void>;
+	deleteTag(name: string): Promise<void>;
 
 	status(): Promise<void>;
 	checkout(treeish: string): Promise<void>;
@@ -161,9 +199,10 @@ export interface Repository {
 	removeRemote(name: string): Promise<void>;
 	renameRemote(name: string, newName: string): Promise<void>;
 
+	fetch(options?: FetchOptions): Promise<void>;
 	fetch(remote?: string, ref?: string, depth?: number): Promise<void>;
 	pull(unshallow?: boolean): Promise<void>;
-	push(remoteName?: string, branchName?: string, setUpstream?: boolean): Promise<void>;
+	push(remoteName?: string, branchName?: string, setUpstream?: boolean, force?: ForcePushMode): Promise<void>;
 
 	blame(path: string): Promise<string>;
 	log(options?: LogOptions): Promise<Commit[]>;
@@ -182,7 +221,14 @@ export interface RemoteSourceProvider {
 	readonly icon?: string; // codicon name
 	readonly supportsQuery?: boolean;
 	getRemoteSources(query?: string): ProviderResult<RemoteSource[]>;
+	getBranches?(url: string): ProviderResult<string[]>;
 	publishRepository?(repository: Repository): Promise<void>;
+}
+
+export interface RemoteSourcePublisher {
+	readonly name: string;
+	readonly icon?: string; // codicon name
+	publishRepository(repository: Repository): Promise<void>;
 }
 
 export interface Credentials {
@@ -194,6 +240,10 @@ export interface CredentialsProvider {
 	getCredentials(host: Uri): ProviderResult<Credentials>;
 }
 
+export interface PostCommitCommandsProvider {
+	getCommands(repository: Repository): Command[];
+}
+
 export interface PushErrorHandler {
 	handlePushError(
 		repository: Repository,
@@ -203,11 +253,42 @@ export interface PushErrorHandler {
 	): Promise<boolean>;
 }
 
+export interface BranchProtection {
+	readonly remote: string;
+	readonly rules: BranchProtectionRule[];
+}
+
+export interface BranchProtectionRule {
+	readonly include?: string[];
+	readonly exclude?: string[];
+}
+
+export interface BranchProtectionProvider {
+	onDidChangeBranchProtection: Event<Uri>;
+	provideBranchProtection(): BranchProtection[];
+}
+
+export interface CommitMessageProvider {
+	readonly title: string;
+	readonly icon?: Uri | { light: Uri; dark: Uri } | ThemeIcon;
+	provideCommitMessage(
+		repository: Repository,
+		changes: string[],
+		cancellationToken?: CancellationToken,
+	): Promise<string | undefined>;
+}
+
 export type APIState = 'uninitialized' | 'initialized';
+
+export interface PublishEvent {
+	repository: Repository;
+	branch?: string;
+}
 
 export interface API {
 	readonly state: APIState;
 	readonly onDidChangeState: Event<APIState>;
+	readonly onDidPublish: Event<PublishEvent>;
 	readonly git: Git;
 	readonly repositories: Repository[];
 	readonly onDidOpenRepository: Event<Repository>;
@@ -215,12 +296,16 @@ export interface API {
 
 	toGitUri(uri: Uri, ref: string): Uri;
 	getRepository(uri: Uri): Repository | null;
-	init(root: Uri): Promise<Repository | null>;
-	openRepository?(root: Uri): Promise<Repository | null>;
+	init(root: Uri, options?: InitOptions): Promise<Repository | null>;
+	openRepository(root: Uri): Promise<Repository | null>;
 
+	registerRemoteSourcePublisher(publisher: RemoteSourcePublisher): Disposable;
 	registerRemoteSourceProvider(provider: RemoteSourceProvider): Disposable;
 	registerCredentialsProvider(provider: CredentialsProvider): Disposable;
+	registerPostCommitCommandsProvider(provider: PostCommitCommandsProvider): Disposable;
 	registerPushErrorHandler(handler: PushErrorHandler): Disposable;
+	registerBranchProtectionProvider(root: Uri, provider: BranchProtectionProvider): Disposable;
+	registerCommitMessageProvider(provider: CommitMessageProvider): Disposable;
 }
 
 export interface GitExtension {
@@ -230,7 +315,7 @@ export interface GitExtension {
 	/**
 	 * Returns a specific API version.
 	 *
-	 * Throws error if git extension is disabled. You can listed to the
+	 * Throws error if git extension is disabled. You can listen to the
 	 * [GitExtension.onDidChangeEnablement](#GitExtension.onDidChangeEnablement) event
 	 * to know when the extension becomes enabled/disabled.
 	 *

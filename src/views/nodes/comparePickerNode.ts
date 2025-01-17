@@ -1,26 +1,25 @@
 import { TreeItem, TreeItemCollapsibleState } from 'vscode';
 import { GlyphChars } from '../../constants';
-import { GitUri } from '../../git/gitUri';
-import { NamedRef } from '../../storage';
-import { SearchAndCompareView, SearchAndCompareViewNode } from '../searchAndCompareView';
-import { ContextValues, ViewNode } from './viewNode';
+import type { StoredNamedRef } from '../../constants.storage';
+import { unknownGitUri } from '../../git/gitUri';
+import type { SearchAndCompareView, SearchAndCompareViewNode } from '../searchAndCompareView';
+import { ContextValues, ViewNode } from './abstract/viewNode';
 
 interface RepoRef {
 	label: string;
 	repoPath: string;
-	ref: string | NamedRef;
+	ref: string | StoredNamedRef;
 }
 
-export class ComparePickerNode extends ViewNode<SearchAndCompareView> {
+export class ComparePickerNode extends ViewNode<'compare-picker', SearchAndCompareView> {
 	readonly order: number = Date.now();
-	readonly pinned: boolean = false;
 
-	constructor(view: SearchAndCompareView, parent: SearchAndCompareViewNode, public readonly selectedRef: RepoRef) {
-		super(GitUri.unknown, view, parent);
-	}
-
-	get canDismiss(): boolean {
-		return true;
+	constructor(
+		view: SearchAndCompareView,
+		parent: SearchAndCompareViewNode,
+		public readonly selectedRef: RepoRef,
+	) {
+		super('compare-picker', unknownGitUri, view, parent);
 	}
 
 	getChildren(): ViewNode[] {

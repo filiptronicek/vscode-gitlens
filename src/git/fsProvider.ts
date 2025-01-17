@@ -1,29 +1,21 @@
-import {
-	Disposable,
-	Event,
-	EventEmitter,
-	FileChangeEvent,
-	FileStat,
-	FileSystemError,
-	FileSystemProvider,
-	FileType,
-	Uri,
-	workspace,
-} from 'vscode';
+import type { Event, FileChangeEvent, FileStat, FileSystemProvider, Uri } from 'vscode';
+import { Disposable, EventEmitter, FileSystemError, FileType, workspace } from 'vscode';
 import { isLinux } from '@env/platform';
 import { Schemes } from '../constants';
-import { Container } from '../container';
-import { GitUri } from '../git/gitUri';
+import type { Container } from '../container';
 import { debug } from '../system/decorators/log';
 import { map } from '../system/iterable';
-import { normalizePath, relative } from '../system/path';
+import { normalizePath } from '../system/path';
 import { TernarySearchTree } from '../system/searchTree';
-import { GitRevision, GitTreeEntry } from './models';
+import { relative } from '../system/vscode/path';
+import { GitUri, isGitUri } from './gitUri';
+import { deletedOrMissing } from './models/revision';
+import type { GitTreeEntry } from './models/tree';
 
 const emptyArray = new Uint8Array(0);
 
 export function fromGitLensFSUri(uri: Uri): { path: string; ref: string; repoPath: string } {
-	const gitUri = GitUri.is(uri) ? uri : GitUri.fromRevisionUri(uri);
+	const gitUri = isGitUri(uri) ? uri : GitUri.fromRevisionUri(uri);
 	return { path: gitUri.relativePath, ref: gitUri.sha!, repoPath: gitUri.repoPath! };
 }
 
@@ -49,14 +41,14 @@ export class GitFileSystemProvider implements FileSystemProvider, Disposable {
 		return this._onDidChangeFile.event;
 	}
 
-	copy?(): void | Thenable<void> {
-		throw FileSystemError.NoPermissions;
+	copy?(source: Uri, _destination: Uri, _options: { readonly overwrite: boolean }): void | Thenable<void> {
+		throw FileSystemError.NoPermissions(source);
 	}
-	createDirectory(): void | Thenable<void> {
-		throw FileSystemError.NoPermissions;
+	createDirectory(uri: Uri): void | Thenable<void> {
+		throw FileSystemError.NoPermissions(uri);
 	}
-	delete(): void | Thenable<void> {
-		throw FileSystemError.NoPermissions;
+	delete(uri: Uri, _options: { readonly recursive: boolean }): void | Thenable<void> {
+		throw FileSystemError.NoPermissions(uri);
 	}
 
 	@debug()
@@ -79,21 +71,21 @@ export class GitFileSystemProvider implements FileSystemProvider, Disposable {
 	async readFile(uri: Uri): Promise<Uint8Array> {
 		const { path, ref, repoPath } = fromGitLensFSUri(uri);
 
-		if (ref === GitRevision.deletedOrMissing) return emptyArray;
+		if (ref === deletedOrMissing) return emptyArray;
 
 		const data = await this.container.git.getRevisionContent(repoPath, path, ref);
 		return data != null ? data : emptyArray;
 	}
 
-	rename(): void | Thenable<void> {
-		throw FileSystemError.NoPermissions;
+	rename(oldUri: Uri, _newUri: Uri, _options: { readonly overwrite: boolean }): void | Thenable<void> {
+		throw FileSystemError.NoPermissions(oldUri);
 	}
 
 	@debug()
 	async stat(uri: Uri): Promise<FileStat> {
 		const { path, ref, repoPath } = fromGitLensFSUri(uri);
 
-		if (ref === GitRevision.deletedOrMissing) {
+		if (ref === deletedOrMissing) {
 			return {
 				type: FileType.File,
 				size: 0,
@@ -105,13 +97,13 @@ export class GitFileSystemProvider implements FileSystemProvider, Disposable {
 		let treeItem;
 
 		const searchTree = this._searchTreeMap.get(ref);
-		if (searchTree !== undefined) {
+		if (searchTree != null) {
 			// Add the fake root folder to the path
 			treeItem = (await searchTree).get(`/~/${path}`);
 		} else {
 			if (path == null || path.length === 0) {
 				const tree = await this.getTree(path, ref, repoPath);
-				if (tree === undefined) throw FileSystemError.FileNotFound(uri);
+				if (tree == null) throw FileSystemError.FileNotFound(uri);
 
 				return {
 					type: FileType.Directory,
@@ -124,9 +116,7 @@ export class GitFileSystemProvider implements FileSystemProvider, Disposable {
 			treeItem = await this.container.git.getTreeEntryForRevision(repoPath, path, ref);
 		}
 
-		if (treeItem === undefined) {
-			throw FileSystemError.FileNotFound(uri);
-		}
+		if (treeItem == null) throw FileSystemError.FileNotFound(uri);
 
 		return {
 			type: typeToFileType(treeItem.type),
@@ -144,8 +134,8 @@ export class GitFileSystemProvider implements FileSystemProvider, Disposable {
 		};
 	}
 
-	writeFile(): void | Thenable<void> {
-		throw FileSystemError.NoPermissions;
+	writeFile(uri: Uri): void | Thenable<void> {
+		throw FileSystemError.NoPermissions(uri);
 	}
 
 	private async createSearchTree(ref: string, repoPath: string) {
@@ -153,7 +143,7 @@ export class GitFileSystemProvider implements FileSystemProvider, Disposable {
 		const trees = await this.container.git.getTreeForRevision(repoPath, ref);
 
 		// Add a fake root folder so that searches will work
-		searchTree.set('~', { commitSha: '', path: '~', size: 0, type: 'tree' });
+		searchTree.set('~', { ref: '', oid: '', path: '~', size: 0, type: 'tree' });
 		for (const item of trees) {
 			searchTree.set(`~/${item.path}`, item);
 		}

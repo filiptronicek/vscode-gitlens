@@ -1,14 +1,14 @@
 import { env, Range, Uri, window } from 'vscode';
-import { Commands } from '../constants';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { command } from '../system/command';
-import { openEditor } from '../system/utils';
-import { Command } from './base';
+import { command } from '../system/vscode/command';
+import { openEditor } from '../system/vscode/utils';
+import { GlCommandBase } from './base';
 
 @command()
-export class OpenFileFromRemoteCommand extends Command {
+export class OpenFileFromRemoteCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(Commands.OpenFileFromRemote);
+		super(GlCommand.OpenFileFromRemote);
 	}
 
 	async execute() {
@@ -54,7 +54,7 @@ export class OpenFileFromRemoteCommand extends Command {
 		}
 
 		try {
-			await openEditor(local.uri, { selection: selection, rethrow: true });
+			await openEditor(local.uri, { selection: selection, throwOnError: true });
 		} catch {
 			const uris = await window.showOpenDialog({
 				title: 'Open local file',

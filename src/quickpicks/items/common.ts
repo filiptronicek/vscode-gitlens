@@ -1,6 +1,7 @@
-import { commands, QuickPickItem, QuickPickItemKind } from 'vscode';
-import { Commands } from '../../constants';
-import { Keys } from '../../keyboard';
+import type { QuickPickItem, ThemeIcon, Uri } from 'vscode';
+import { commands, QuickPickItemKind } from 'vscode';
+import type { Keys } from '../../constants';
+import type { GlCommands } from '../../constants.commands';
 
 declare module 'vscode' {
 	interface QuickPickItem {
@@ -13,24 +14,27 @@ export interface QuickPickSeparator extends QuickPickItem {
 	kind: QuickPickItemKind.Separator;
 }
 
-export namespace QuickPickSeparator {
-	export function create(label?: string): QuickPickSeparator {
-		return { kind: QuickPickItemKind.Separator, label: label ?? '' };
-	}
+export function createQuickPickSeparator<T = QuickPickSeparator>(label?: string): T {
+	return { kind: QuickPickItemKind.Separator, label: label ?? '' } as unknown as T;
 }
 
 export interface QuickPickItemOfT<T = any> extends QuickPickItem {
 	readonly item: T;
 }
 
+export function createQuickPickItemOfT<T = any>(labelOrItem: string | QuickPickItem, item: T): QuickPickItemOfT<T> {
+	return typeof labelOrItem === 'string' ? { label: labelOrItem, item: item } : { ...labelOrItem, item: item };
+}
+
 export class CommandQuickPickItem<Arguments extends any[] = any[]> implements QuickPickItem {
-	static fromCommand<T>(label: string, command: Commands, args?: T): CommandQuickPickItem;
-	static fromCommand<T>(item: QuickPickItem, command: Commands, args?: T): CommandQuickPickItem;
-	static fromCommand<T>(labelOrItem: string | QuickPickItem, command: Commands, args?: T): CommandQuickPickItem {
+	static fromCommand<T>(label: string, command: GlCommands, args?: T): CommandQuickPickItem;
+	static fromCommand<T>(item: QuickPickItem, command: GlCommands, args?: T): CommandQuickPickItem;
+	static fromCommand<T>(labelOrItem: string | QuickPickItem, command: GlCommands, args?: T): CommandQuickPickItem {
 		return new CommandQuickPickItem(
 			typeof labelOrItem === 'string' ? { label: labelOrItem } : labelOrItem,
+			undefined,
 			command,
-			args == null ? [] : [args],
+			args == null ? [] : Array.isArray(args) ? args : [args],
 		);
 	}
 
@@ -41,10 +45,12 @@ export class CommandQuickPickItem<Arguments extends any[] = any[]> implements Qu
 	label!: string;
 	description?: string;
 	detail?: string | undefined;
+	iconPath?: Uri | { light: Uri; dark: Uri } | ThemeIcon | undefined;
 
 	constructor(
 		label: string,
-		command?: Commands,
+		iconPath?: Uri | { light: Uri; dark: Uri } | ThemeIcon | undefined,
+		command?: GlCommands,
 		args?: Arguments,
 		options?: {
 			onDidPressKey?: (key: Keys, result: Thenable<unknown>) => void;
@@ -53,7 +59,8 @@ export class CommandQuickPickItem<Arguments extends any[] = any[]> implements Qu
 	);
 	constructor(
 		item: QuickPickItem,
-		command?: Commands,
+		iconPath?: Uri | { light: Uri; dark: Uri } | ThemeIcon | undefined,
+		command?: GlCommands,
 		args?: Arguments,
 		options?: {
 			onDidPressKey?: (key: Keys, result: Thenable<unknown>) => void;
@@ -62,7 +69,8 @@ export class CommandQuickPickItem<Arguments extends any[] = any[]> implements Qu
 	);
 	constructor(
 		labelOrItem: string | QuickPickItem,
-		command?: Commands,
+		iconPath?: Uri | { light: Uri; dark: Uri } | ThemeIcon | undefined,
+		command?: GlCommands,
 		args?: Arguments,
 		options?: {
 			onDidPressKey?: (key: Keys, result: Thenable<unknown>) => void;
@@ -71,7 +79,8 @@ export class CommandQuickPickItem<Arguments extends any[] = any[]> implements Qu
 	);
 	constructor(
 		labelOrItem: string | QuickPickItem,
-		protected readonly command?: Commands,
+		iconPath?: Uri | { light: Uri; dark: Uri } | ThemeIcon | undefined,
+		protected readonly command?: GlCommands,
 		protected readonly args?: Arguments,
 		protected readonly options?: {
 			// onDidExecute?: (
@@ -89,6 +98,10 @@ export class CommandQuickPickItem<Arguments extends any[] = any[]> implements Qu
 			this.label = labelOrItem;
 		} else {
 			Object.assign(this, labelOrItem);
+		}
+
+		if (iconPath != null) {
+			this.iconPath = iconPath;
 		}
 	}
 

@@ -1,41 +1,16 @@
-import { configuration, DateStyle, TagSorting } from '../../configuration';
 import { Container } from '../../container';
 import { formatDate, fromNow } from '../../system/date';
 import { memoize } from '../../system/decorators/memoize';
-import { sortCompare } from '../../system/string';
-import { GitReference, GitTagReference } from './reference';
+import { getLoggableName } from '../../system/logger';
+import type { GitReference, GitTagReference } from './reference';
 
-export interface TagSortOptions {
-	current?: boolean;
-	orderBy?: TagSorting;
+export function getTagId(repoPath: string, name: string): string {
+	return `${repoPath}|tag/${name}`;
 }
 
 export class GitTag implements GitTagReference {
-	static is(tag: any): tag is GitTag {
-		return tag instanceof GitTag;
-	}
-
-	static isOfRefType(tag: GitReference | undefined) {
-		return tag?.refType === 'tag';
-	}
-
-	static sort(tags: GitTag[], options?: TagSortOptions) {
-		options = { orderBy: configuration.get('sortTagsBy'), ...options };
-
-		switch (options.orderBy) {
-			case TagSorting.DateAsc:
-				return tags.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
-			case TagSorting.NameAsc:
-				return tags.sort((a, b) => sortCompare(a.name, b.name));
-			case TagSorting.NameDesc:
-				return tags.sort((a, b) => sortCompare(b.name, a.name));
-			case TagSorting.DateDesc:
-			default:
-				return tags.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0));
-		}
-	}
-
 	readonly refType = 'tag';
+	readonly id: string;
 
 	constructor(
 		public readonly repoPath: string,
@@ -44,10 +19,16 @@ export class GitTag implements GitTagReference {
 		public readonly message: string,
 		public readonly date: Date | undefined,
 		public readonly commitDate: Date | undefined,
-	) {}
+	) {
+		this.id = getTagId(repoPath, name);
+	}
+
+	toString(): string {
+		return `${getLoggableName(this)}(${this.id})`;
+	}
 
 	get formattedDate(): string {
-		return Container.instance.TagDateFormatting.dateStyle === DateStyle.Absolute
+		return Container.instance.TagDateFormatting.dateStyle === 'absolute'
 			? this.formatDate(Container.instance.TagDateFormatting.dateFormat)
 			: this.formatDateFromNow();
 	}
@@ -79,4 +60,12 @@ export class GitTag implements GitTagReference {
 		const index = this.name.lastIndexOf('/');
 		return index !== -1 ? this.name.substring(index + 1) : this.name;
 	}
+}
+
+export function isTag(tag: any): tag is GitTag {
+	return tag instanceof GitTag;
+}
+
+export function isOfTagRefType(tag: GitReference | undefined) {
+	return tag?.refType === 'tag';
 }

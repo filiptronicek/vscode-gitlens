@@ -1,12 +1,12 @@
-import { window } from 'vscode';
-import { Commands } from '../constants';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { RemoteResourceType } from '../git/remotes/provider';
-import { Logger } from '../logger';
-import { command, executeCommand } from '../system/command';
-import { ResultsCommitsNode } from '../views/nodes';
-import { Command, CommandContext } from './base';
-import { OpenOnRemoteCommandArgs } from './openOnRemote';
+import { RemoteResourceType } from '../git/models/remoteResource';
+import { showGenericErrorMessage } from '../messages';
+import { Logger } from '../system/logger';
+import { command, executeCommand } from '../system/vscode/command';
+import type { CommandContext } from './base';
+import { GlCommandBase } from './base';
+import type { OpenOnRemoteCommandArgs } from './openOnRemote';
 
 export interface OpenComparisonOnRemoteCommandArgs {
 	clipboard?: boolean;
@@ -17,24 +17,38 @@ export interface OpenComparisonOnRemoteCommandArgs {
 }
 
 @command()
-export class OpenComparisonOnRemoteCommand extends Command {
+export class OpenComparisonOnRemoteCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super([Commands.OpenComparisonOnRemote, Commands.CopyRemoteComparisonUrl]);
+		super([GlCommand.OpenComparisonOnRemote, GlCommand.CopyRemoteComparisonUrl]);
 	}
 
 	protected override preExecute(context: CommandContext, args?: OpenComparisonOnRemoteCommandArgs) {
 		if (context.type === 'viewItem') {
-			if (context.node instanceof ResultsCommitsNode) {
+			if (context.node.isAny('results-commits')) {
 				args = {
 					...args,
 					repoPath: context.node.repoPath,
-					ref1: context.node.ref1,
-					ref2: context.node.ref2,
+					ref1: context.node.ref1 || 'HEAD',
+					ref2: context.node.ref2 || 'HEAD',
+				};
+			} else if (context.node.is('compare-results')) {
+				args = {
+					...args,
+					repoPath: context.node.repoPath,
+					ref1: context.node.ahead.ref1,
+					ref2: context.node.ahead.ref2,
+				};
+			} else if (context.node.is('compare-branch')) {
+				args = {
+					...args,
+					repoPath: context.node.repoPath,
+					ref1: context.node.ahead.ref1,
+					ref2: context.node.ahead.ref2,
 				};
 			}
 		}
 
-		if (context.command === Commands.CopyRemoteBranchesUrl) {
+		if (context.command === GlCommand.CopyRemoteComparisonUrl) {
 			args = { ...args, clipboard: true };
 		}
 
@@ -45,7 +59,7 @@ export class OpenComparisonOnRemoteCommand extends Command {
 		if (args?.repoPath == null || args.ref1 == null || args.ref2 == null) return;
 
 		try {
-			void (await executeCommand<OpenOnRemoteCommandArgs>(Commands.OpenOnRemote, {
+			void (await executeCommand<OpenOnRemoteCommandArgs>(GlCommand.OpenOnRemote, {
 				resource: {
 					type: RemoteResourceType.Comparison,
 					base: args.ref1,
@@ -57,9 +71,7 @@ export class OpenComparisonOnRemoteCommand extends Command {
 			}));
 		} catch (ex) {
 			Logger.error(ex, 'OpenComparisonOnRemoteCommand');
-			void window.showErrorMessage(
-				'Unable to open comparison on remote provider. See output channel for more details',
-			);
+			void showGenericErrorMessage('Unable to open comparison on remote provider');
 		}
 	}
 }

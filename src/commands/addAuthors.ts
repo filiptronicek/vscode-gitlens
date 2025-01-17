@@ -1,14 +1,14 @@
-import { SourceControl } from 'vscode';
-import { Commands } from '../constants';
+import type { SourceControl } from 'vscode';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { command } from '../system/command';
-import { Command } from './base';
-import { executeGitCommand } from './gitCommands.actions';
+import { executeGitCommand } from '../git/actions';
+import { command } from '../system/vscode/command';
+import { GlCommandBase } from './base';
 
 @command()
-export class AddAuthorsCommand extends Command {
+export class AddAuthorsCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(Commands.AddAuthors);
+		super(GlCommand.AddAuthors);
 	}
 
 	execute(sourceControl: SourceControl) {

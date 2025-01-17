@@ -1,22 +1,23 @@
-import { Uri, window } from 'vscode';
-import { Commands } from '../constants';
+import type { Uri } from 'vscode';
+import { window } from 'vscode';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { Logger } from '../logger';
-import { Messages } from '../messages';
-import { RepositoryPicker } from '../quickpicks/repositoryPicker';
+import { showGenericErrorMessage } from '../messages';
+import { getRepositoryOrShowPicker } from '../quickpicks/repositoryPicker';
 import { filterMap } from '../system/array';
-import { command } from '../system/command';
-import { findOrOpenEditors } from '../system/utils';
-import { Command } from './base';
+import { Logger } from '../system/logger';
+import { command } from '../system/vscode/command';
+import { findOrOpenEditors } from '../system/vscode/utils';
+import { GlCommandBase } from './base';
 
 export interface OpenChangedFilesCommandArgs {
 	uris?: Uri[];
 }
 
 @command()
-export class OpenChangedFilesCommand extends Command {
+export class OpenChangedFilesCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(Commands.OpenChangedFiles);
+		super(GlCommand.OpenChangedFiles);
 	}
 
 	async execute(args?: OpenChangedFilesCommandArgs) {
@@ -24,10 +25,10 @@ export class OpenChangedFilesCommand extends Command {
 
 		try {
 			if (args.uris == null) {
-				const repository = await RepositoryPicker.getRepositoryOrShow('Open All Changed Files');
+				const repository = await getRepositoryOrShowPicker('Open All Changed Files');
 				if (repository == null) return;
 
-				const status = await this.container.git.getStatusForRepo(repository.uri);
+				const status = await this.container.git.status(repository.uri).getStatus();
 				if (status == null) {
 					void window.showWarningMessage('Unable to open changed files');
 
@@ -40,7 +41,7 @@ export class OpenChangedFilesCommand extends Command {
 			findOrOpenEditors(args.uris);
 		} catch (ex) {
 			Logger.error(ex, 'OpenChangedFilesCommand');
-			void Messages.showGenericErrorMessage('Unable to open all changed files');
+			void showGenericErrorMessage('Unable to open all changed files');
 		}
 	}
 }

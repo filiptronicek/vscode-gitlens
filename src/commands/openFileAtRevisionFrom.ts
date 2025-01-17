@@ -1,16 +1,17 @@
-import { TextDocumentShowOptions, TextEditor, Uri } from 'vscode';
-import { FileAnnotationType } from '../configuration';
-import { Commands, GlyphChars, quickPickTitleMaxChars } from '../constants';
+import type { TextDocumentShowOptions, TextEditor, Uri } from 'vscode';
+import type { FileAnnotationType } from '../config';
+import { GlyphChars, quickPickTitleMaxChars } from '../constants';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
+import { openFileAtRevision } from '../git/actions/commit';
 import { GitUri } from '../git/gitUri';
-import { GitReference } from '../git/models';
-import { Messages } from '../messages';
-import { StashPicker } from '../quickpicks/commitPicker';
-import { ReferencePicker } from '../quickpicks/referencePicker';
-import { command } from '../system/command';
+import type { GitReference } from '../git/models/reference';
+import { showNoRepositoryWarningMessage } from '../messages';
+import { showStashPicker } from '../quickpicks/commitPicker';
+import { showReferencePicker } from '../quickpicks/referencePicker';
 import { pad } from '../system/string';
+import { command } from '../system/vscode/command';
 import { ActiveEditorCommand, getCommandUri } from './base';
-import { GitActions } from './gitCommands.actions';
 
 export interface OpenFileAtRevisionFromCommandArgs {
 	reference?: GitReference;
@@ -24,7 +25,7 @@ export interface OpenFileAtRevisionFromCommandArgs {
 @command()
 export class OpenFileAtRevisionFromCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super(Commands.OpenFileAtRevisionFrom);
+		super(GlCommand.OpenFileAtRevisionFrom);
 	}
 
 	async execute(editor: TextEditor | undefined, uri?: Uri, args?: OpenFileAtRevisionFromCommandArgs) {
@@ -33,7 +34,7 @@ export class OpenFileAtRevisionFromCommand extends ActiveEditorCommand {
 
 		const gitUri = await GitUri.fromUri(uri);
 		if (!gitUri.repoPath) {
-			void Messages.showNoRepositoryWarningMessage('Unable to open file revision');
+			void showNoRepositoryWarningMessage('Unable to open file revision');
 			return;
 		}
 
@@ -47,8 +48,8 @@ export class OpenFileAtRevisionFromCommand extends ActiveEditorCommand {
 				const path = this.container.git.getRelativePath(gitUri, gitUri.repoPath);
 
 				const title = `Open Changes with Stash${pad(GlyphChars.Dot, 2, 2)}`;
-				const pick = await StashPicker.show(
-					this.container.git.getStash(gitUri.repoPath),
+				const pick = await showStashPicker(
+					this.container.git.stash(gitUri.repoPath)?.getStash(),
 					`${title}${gitUri.getFormattedFileName({ truncateTo: quickPickTitleMaxChars - title.length })}`,
 					'Choose a stash to compare with',
 					// Stashes should always come with files, so this should be fine (but protect it just in case)
@@ -59,26 +60,25 @@ export class OpenFileAtRevisionFromCommand extends ActiveEditorCommand {
 				args.reference = pick;
 			} else {
 				const title = `Open File at Branch or Tag${pad(GlyphChars.Dot, 2, 2)}`;
-				const pick = await ReferencePicker.show(
+				const pick = await showReferencePicker(
 					gitUri.repoPath,
 					`${title}${gitUri.getFormattedFileName({ truncateTo: quickPickTitleMaxChars - title.length })}`,
 					'Choose a branch or tag to open the file revision from',
 					{
-						allowEnteringRefs: true,
-						keys: ['right', 'alt+right', 'ctrl+right'],
-						onDidPressKey: async (key, quickpick) => {
-							const [item] = quickpick.activeItems;
-							if (item != null) {
-								void (await GitActions.Commit.openFileAtRevision(
+						allowRevisions: true,
+						keyboard: {
+							keys: ['right', 'alt+right', 'ctrl+right'],
+							onDidPressKey: async (_key, item) => {
+								await openFileAtRevision(
 									this.container.git.getRevisionUri(item.ref, gitUri.fsPath, gitUri.repoPath!),
 									{
-										annotationType: args!.annotationType,
-										line: args!.line,
+										annotationType: args.annotationType,
+										line: args.line,
 										preserveFocus: true,
-										preview: false,
+										preview: true,
 									},
-								));
-							}
+								);
+							},
 						},
 					},
 				);
@@ -88,13 +88,13 @@ export class OpenFileAtRevisionFromCommand extends ActiveEditorCommand {
 			}
 		}
 
-		void (await GitActions.Commit.openFileAtRevision(
+		await openFileAtRevision(
 			this.container.git.getRevisionUri(args.reference.ref, gitUri.fsPath, gitUri.repoPath),
 			{
 				annotationType: args.annotationType,
 				line: args.line,
 				...args.showOptions,
 			},
-		));
+		);
 	}
 }

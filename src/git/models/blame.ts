@@ -1,4 +1,4 @@
-import { GitCommit, GitCommitLine } from './commit';
+import type { GitCommit, GitCommitLine } from './commit';
 
 export interface GitBlame {
 	readonly repoPath: string;
@@ -16,14 +16,4 @@ export interface GitBlameLine {
 	readonly author?: GitBlameAuthor;
 	readonly commit: GitCommit;
 	readonly line: GitCommitLine;
-}
-
-export interface GitBlameLines extends GitBlame {
-	readonly allLines: GitCommitLine[];
-}
-
-export interface GitBlameCommitLines {
-	readonly author: GitBlameAuthor;
-	readonly commit: GitCommit;
-	readonly lines: GitCommitLine[];
 }

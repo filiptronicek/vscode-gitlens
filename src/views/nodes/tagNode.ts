@@ -1,42 +1,49 @@
 import { TreeItem, TreeItemCollapsibleState, window } from 'vscode';
-import { ViewBranchesLayout } from '../../configuration';
 import { GlyphChars } from '../../constants';
-import { Container } from '../../container';
 import { emojify } from '../../emojis';
-import { GitUri } from '../../git/gitUri';
-import { GitLog, GitRevision, GitTag, GitTagReference } from '../../git/models';
+import type { GitUri } from '../../git/gitUri';
+import type { GitLog } from '../../git/models/log';
+import type { GitTagReference } from '../../git/models/reference';
+import { shortenRevision } from '../../git/models/revision.utils';
+import type { GitTag } from '../../git/models/tag';
 import { gate } from '../../system/decorators/gate';
 import { debug } from '../../system/decorators/log';
 import { map } from '../../system/iterable';
 import { pad } from '../../system/string';
-import { RepositoriesView } from '../repositoriesView';
-import { TagsView } from '../tagsView';
+import type { ViewsWithTags } from '../viewBase';
+import type { PageableViewNode, ViewNode } from './abstract/viewNode';
+import { ContextValues, getViewNodeId } from './abstract/viewNode';
+import { ViewRefNode } from './abstract/viewRefNode';
 import { CommitNode } from './commitNode';
 import { LoadMoreNode, MessageNode } from './common';
 import { insertDateMarkers } from './helpers';
-import { RepositoryNode } from './repositoryNode';
-import { ContextValues, PageableViewNode, ViewNode, ViewRefNode } from './viewNode';
 
-export class TagNode extends ViewRefNode<TagsView | RepositoriesView, GitTagReference> implements PageableViewNode {
-	static key = ':tag';
-	static getId(repoPath: string, name: string): string {
-		return `${RepositoryNode.getId(repoPath)}${this.key}(${name})`;
+export class TagNode extends ViewRefNode<'tag', ViewsWithTags, GitTagReference> implements PageableViewNode {
+	limit: number | undefined;
+
+	constructor(
+		uri: GitUri,
+		view: ViewsWithTags,
+		public override parent: ViewNode,
+		public readonly tag: GitTag,
+	) {
+		super('tag', uri, view, parent);
+
+		this.updateContext({ tag: tag });
+		this._uniqueId = getViewNodeId(this.type, this.context);
+		this.limit = this.view.getNodeLastKnownLimit(this);
 	}
 
-	constructor(uri: GitUri, view: TagsView | RepositoriesView, parent: ViewNode, public readonly tag: GitTag) {
-		super(uri, view, parent);
+	override get id(): string {
+		return this._uniqueId;
 	}
 
 	override toClipboard(): string {
 		return this.tag.name;
 	}
 
-	override get id(): string {
-		return TagNode.getId(this.tag.repoPath, this.tag.name);
-	}
-
 	get label(): string {
-		return this.view.config.branches.layout === ViewBranchesLayout.Tree ? this.tag.getBasename() : this.tag.name;
+		return this.view.config.branches.layout === 'tree' ? this.tag.getBasename() : this.tag.name;
 	}
 
 	get ref(): GitTagReference {
@@ -47,7 +54,7 @@ export class TagNode extends ViewRefNode<TagsView | RepositoriesView, GitTagRefe
 		const log = await this.getLog();
 		if (log == null) return [new MessageNode(this.view, this, 'No commits could be found.')];
 
-		const getBranchAndTagTips = await this.view.container.git.getBranchesAndTagsTipsFn(
+		const getBranchAndTagTips = await this.view.container.git.getBranchesAndTagsTipsLookup(
 			this.uri.repoPath,
 			this.tag.name,
 		);
@@ -76,18 +83,18 @@ export class TagNode extends ViewRefNode<TagsView | RepositoriesView, GitTagRefe
 		item.id = this.id;
 		item.contextValue = ContextValues.Tag;
 		item.description = emojify(this.tag.message);
-		item.tooltip = `${this.tag.name}${pad(GlyphChars.Dash, 2, 2)}${GitRevision.shorten(this.tag.sha, {
+		item.tooltip = `${this.tag.name}${pad(GlyphChars.Dash, 2, 2)}${shortenRevision(this.tag.sha, {
 			force: true,
 		})}${
 			this.tag.date != null
 				? `\n${this.tag.formatDateFromNow()} (${this.tag.formatDate(
-						Container.instance.TagDateFormatting.dateFormat,
+						this.view.container.TagDateFormatting.dateFormat,
 				  )})`
 				: ''
 		}\n\n${emojify(this.tag.message)}${
 			this.tag.commitDate != null && this.tag.date !== this.tag.commitDate
 				? `\n${this.tag.formatCommitDateFromNow()} (${this.tag.formatCommitDate(
-						Container.instance.TagDateFormatting.dateFormat,
+						this.view.container.TagDateFormatting.dateFormat,
 				  )})`
 				: ''
 		}`;
@@ -119,7 +126,6 @@ export class TagNode extends ViewRefNode<TagsView | RepositoriesView, GitTagRefe
 		return this._log?.hasMore ?? true;
 	}
 
-	limit: number | undefined = this.view.getNodeLastKnownLimit(this);
 	@gate()
 	async loadMore(limit?: number | { until?: any }) {
 		let log = await window.withProgress(
@@ -128,7 +134,7 @@ export class TagNode extends ViewRefNode<TagsView | RepositoriesView, GitTagRefe
 			},
 			() => this.getLog(),
 		);
-		if (log == null || !log.hasMore) return;
+		if (!log?.hasMore) return;
 
 		log = await log.more?.(limit ?? this.view.config.pageItemLimit);
 		if (this._log === log) return;

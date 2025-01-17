@@ -1,16 +1,16 @@
-import { Commands, CoreCommands } from '../constants';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { command, executeCoreCommand } from '../system/command';
-import { Command } from './base';
+import { command, executeCoreCommand } from '../system/vscode/command';
+import { GlCommandBase } from './base';
 
 @command()
-export class RefreshHoverCommand extends Command {
+export class RefreshHoverCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(Commands.RefreshHover);
+		super(GlCommand.RefreshHover);
 	}
 
 	async execute() {
 		// TODO@eamodio figure out how to really refresh/update a hover
-		await executeCoreCommand(CoreCommands.EditorShowHover);
+		await executeCoreCommand('editor.action.showHover');
 	}
 }

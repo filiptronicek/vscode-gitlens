@@ -1,12 +1,17 @@
-import { Range, TextEditor, Uri } from 'vscode';
-import { Commands } from '../constants';
+import type { Range, TextEditor, Uri } from 'vscode';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
+import { executeGitCommand } from '../git/actions';
 import { GitUri } from '../git/gitUri';
-import { GitBranch, GitLog, GitReference, GitTag } from '../git/models';
-import { CommandQuickPickItem } from '../quickpicks/items/common';
-import { command } from '../system/command';
-import { ActiveEditorCachedCommand, CommandContext, getCommandUri } from './base';
-import { executeGitCommand } from './gitCommands.actions';
+import type { GitBranch } from '../git/models/branch';
+import type { GitLog } from '../git/models/log';
+import type { GitReference } from '../git/models/reference';
+import type { GitTag } from '../git/models/tag';
+import type { CommandQuickPickItem } from '../quickpicks/items/common';
+import { command } from '../system/vscode/command';
+import { getScmResourceFolderUri } from '../system/vscode/scm';
+import type { CommandContext } from './base';
+import { ActiveEditorCachedCommand, getCommandUri } from './base';
 
 export interface ShowQuickFileHistoryCommandArgs {
 	reference?: GitBranch | GitTag | GitReference;
@@ -23,25 +28,31 @@ export interface ShowQuickFileHistoryCommandArgs {
 export class ShowQuickFileHistoryCommand extends ActiveEditorCachedCommand {
 	constructor(private readonly container: Container) {
 		super([
-			Commands.OpenFileHistory,
-			Commands.OpenFolderHistory,
-			Commands.ShowQuickFileHistory,
-			Commands.QuickOpenFileHistory,
-			Commands.Deprecated_ShowFileHistoryInView,
+			GlCommand.OpenFileHistory,
+			GlCommand.OpenFolderHistory,
+			GlCommand.ShowQuickFileHistory,
+			GlCommand.QuickOpenFileHistory,
+			GlCommand.Deprecated_ShowFileHistoryInView,
 		]);
 	}
 
 	protected override preExecute(context: CommandContext, args?: ShowQuickFileHistoryCommandArgs) {
+		let uri = context.uri;
 		if (
-			context.command === Commands.OpenFileHistory ||
-			context.command === Commands.OpenFolderHistory ||
-			context.command === Commands.Deprecated_ShowFileHistoryInView
+			context.command === GlCommand.OpenFileHistory ||
+			context.command === GlCommand.Deprecated_ShowFileHistoryInView
 		) {
 			args = { ...args };
 			args.showInSideBar = true;
+		} else if (context.command === GlCommand.OpenFolderHistory) {
+			args = { ...args };
+			args.showInSideBar = true;
+			if (context.type === 'scm-states') {
+				uri = getScmResourceFolderUri(context.args) ?? context.uri;
+			}
 		}
 
-		return this.execute(context.editor, context.uri, args);
+		return this.execute(context.editor, uri, args);
 	}
 
 	async execute(editor?: TextEditor, uri?: Uri, args?: ShowQuickFileHistoryCommandArgs) {
@@ -51,12 +62,12 @@ export class ShowQuickFileHistoryCommand extends ActiveEditorCachedCommand {
 		const gitUri = await GitUri.fromUri(uri);
 
 		if (args?.showInSideBar) {
-			await this.container.fileHistoryView.showHistoryForUri(gitUri);
+			await this.container.views.fileHistory.showHistoryForUri(gitUri);
 
 			return;
 		}
 
-		void (await executeGitCommand({
+		await executeGitCommand({
 			command: 'log',
 			state:
 				gitUri?.repoPath != null
@@ -66,6 +77,6 @@ export class ShowQuickFileHistoryCommand extends ActiveEditorCachedCommand {
 							fileName: gitUri.relativePath,
 					  }
 					: {},
-		}));
+		});
 	}
 }

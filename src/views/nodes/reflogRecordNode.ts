@@ -1,44 +1,34 @@
 import { TreeItem, TreeItemCollapsibleState, window } from 'vscode';
 import { GlyphChars } from '../../constants';
 import { GitUri } from '../../git/gitUri';
-import { GitLog, GitReflogRecord } from '../../git/models';
+import type { GitLog } from '../../git/models/log';
+import type { GitReflogRecord } from '../../git/models/reflog';
 import { gate } from '../../system/decorators/gate';
 import { debug } from '../../system/decorators/log';
 import { map } from '../../system/iterable';
-import { ViewsWithCommits } from '../viewBase';
+import type { ViewsWithCommits } from '../viewBase';
+import type { PageableViewNode } from './abstract/viewNode';
+import { ContextValues, getViewNodeId, ViewNode } from './abstract/viewNode';
 import { CommitNode } from './commitNode';
 import { LoadMoreNode, MessageNode } from './common';
-import { RepositoryNode } from './repositoryNode';
-import { ContextValues, PageableViewNode, ViewNode } from './viewNode';
 
-export class ReflogRecordNode extends ViewNode<ViewsWithCommits> implements PageableViewNode {
-	static key = ':reflog-record';
-	static getId(
-		repoPath: string,
-		sha: string,
-		selector: string,
-		command: string,
-		commandArgs: string | undefined,
-		date: Date,
-	): string {
-		return `${RepositoryNode.getId(repoPath)}${this.key}(${sha}|${selector}|${command}|${
-			commandArgs ?? ''
-		}|${date.getTime()})`;
-	}
+export class ReflogRecordNode extends ViewNode<'reflog-record', ViewsWithCommits> implements PageableViewNode {
+	limit: number | undefined;
 
-	constructor(view: ViewsWithCommits, parent: ViewNode, public readonly record: GitReflogRecord) {
-		super(GitUri.fromRepoPath(record.repoPath), view, parent);
+	constructor(
+		view: ViewsWithCommits,
+		parent: ViewNode,
+		public readonly record: GitReflogRecord,
+	) {
+		super('reflog-record', GitUri.fromRepoPath(record.repoPath), view, parent);
+
+		this.updateContext({ reflog: record });
+		this._uniqueId = getViewNodeId(this.type, this.context);
+		this.limit = this.view.getNodeLastKnownLimit(this);
 	}
 
 	override get id(): string {
-		return ReflogRecordNode.getId(
-			this.uri.repoPath!,
-			this.record.sha,
-			this.record.selector,
-			this.record.command,
-			this.record.commandArgs,
-			this.record.date,
-		);
+		return this._uniqueId;
 	}
 
 	async getChildren(): Promise<ViewNode[]> {
@@ -103,7 +93,6 @@ export class ReflogRecordNode extends ViewNode<ViewsWithCommits> implements Page
 		return this._log?.hasMore ?? true;
 	}
 
-	limit: number | undefined = this.view.getNodeLastKnownLimit(this);
 	@gate()
 	async loadMore(limit?: number | { until?: any }) {
 		let log = await window.withProgress(
@@ -112,7 +101,7 @@ export class ReflogRecordNode extends ViewNode<ViewsWithCommits> implements Page
 			},
 			() => this.getLog(),
 		);
-		if (log === undefined || !log.hasMore) return;
+		if (!log?.hasMore) return;
 
 		log = await log.more?.(limit ?? this.view.config.pageItemLimit);
 		if (this._log === log) return;

@@ -1,12 +1,13 @@
-import { Range, TextDocumentShowOptions, TextEditor, Uri, window } from 'vscode';
-import { FileAnnotationType } from '../configuration';
-import { Commands } from '../constants';
+import type { TextDocumentShowOptions, TextEditor, Uri } from 'vscode';
+import { Range, window } from 'vscode';
+import type { FileAnnotationType } from '../config';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { GitUri } from '../git/gitUri';
-import { Logger } from '../logger';
-import { Messages } from '../messages';
-import { command } from '../system/command';
-import { findOrOpenEditor } from '../system/utils';
+import { GitUri, isGitUri } from '../git/gitUri';
+import { showGenericErrorMessage } from '../messages';
+import { Logger } from '../system/logger';
+import { command } from '../system/vscode/command';
+import { findOrOpenEditor } from '../system/vscode/utils';
 import { ActiveEditorCommand, getCommandUri } from './base';
 
 export interface OpenWorkingFileCommandArgs {
@@ -19,7 +20,7 @@ export interface OpenWorkingFileCommandArgs {
 @command()
 export class OpenWorkingFileCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super([Commands.OpenWorkingFile, Commands.OpenWorkingFileInDiffLeft, Commands.OpenWorkingFileInDiffRight]);
+		super([GlCommand.OpenWorkingFile, GlCommand.OpenWorkingFileInDiffLeft, GlCommand.OpenWorkingFileInDiffRight]);
 	}
 
 	async execute(editor: TextEditor, uri?: Uri, args?: OpenWorkingFileCommandArgs) {
@@ -37,7 +38,7 @@ export class OpenWorkingFileCommand extends ActiveEditorCommand {
 			}
 
 			args.uri = await GitUri.fromUri(uri);
-			if (GitUri.is(args.uri) && args.uri.sha) {
+			if (isGitUri(args.uri) && args.uri.sha) {
 				const workingUri = await this.container.git.getWorkingUri(args.uri.repoPath!, args.uri);
 				if (workingUri === undefined) {
 					void window.showWarningMessage(
@@ -65,7 +66,7 @@ export class OpenWorkingFileCommand extends ActiveEditorCommand {
 			}));
 		} catch (ex) {
 			Logger.error(ex, 'OpenWorkingFileCommand');
-			void Messages.showGenericErrorMessage('Unable to open working file');
+			void showGenericErrorMessage('Unable to open working file');
 		}
 	}
 }

@@ -1,13 +1,5 @@
-import {
-	getTokensFromTemplate,
-	getWidth,
-	interpolate,
-	interpolateAsync,
-	padLeft,
-	padRight,
-	TokenOptions,
-	truncate,
-} from '../../system/string';
+import type { TokenOptions } from '../../system/string';
+import { getTokensFromTemplate, getTruncatedWidth, getWidth, interpolate, interpolateAsync } from '../../system/string';
 
 export interface FormatOptions {
 	dateFormat?: string | null;
@@ -19,7 +11,16 @@ type Constructor<T = Record<string, unknown>> = new (...args: any[]) => T;
 const hasTokenRegexMap = new Map<string, RegExp>();
 const spaceReplacementRegex = / /g;
 
-declare type RequiredTokenOptions<Options extends FormatOptions> = Options & Required<Pick<Options, 'tokenOptions'>>;
+export declare type RequiredTokenOptions<Options extends FormatOptions> = Options &
+	Required<Pick<Options, 'tokenOptions'>>;
+
+const defaultTokenOptions: Required<TokenOptions> = {
+	collapseWhitespace: false,
+	padDirection: 'left',
+	prefix: undefined,
+	suffix: undefined,
+	truncateTo: undefined,
+};
 
 export abstract class Formatter<Item = any, Options extends FormatOptions = FormatOptions> {
 	protected _item!: Item;
@@ -36,8 +37,7 @@ export abstract class Formatter<Item = any, Options extends FormatOptions = Form
 		if (options == null && this._options != null) return;
 
 		if (options == null) {
-			// eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-			options = {} as Options;
+			options = {} as unknown as Options;
 		}
 
 		if (options.dateFormat == null) {
@@ -57,48 +57,52 @@ export abstract class Formatter<Item = any, Options extends FormatOptions = Form
 		if (s == null || s.length === 0) return s;
 
 		// NOTE: the collapsable whitespace logic relies on the javascript template evaluation to be left to right
-		if (options == null) {
-			options = {
-				collapseWhitespace: false,
-				padDirection: 'left',
-				prefix: undefined,
-				suffix: undefined,
-				truncateTo: undefined,
-			};
+		options ??= defaultTokenOptions;
+
+		// 0 is a special case to collapse to just the prefix and suffix
+		if (options.truncateTo === 0) {
+			return `${options.prefix ? options.prefix.trimEnd() : ''}${
+				options.suffix ? options.suffix.trimStart() : ''
+			}`;
 		}
+
+		if (options.prefix) {
+			s = `${options.prefix}${s}`;
+		}
+
+		const suffixWidth = options.suffix ? getWidth(options.suffix) : 0;
 
 		let max = options.truncateTo;
 		if (max == null) {
 			this.collapsableWhitespace = 0;
-		} else {
-			max += this.collapsableWhitespace;
-			this.collapsableWhitespace = 0;
-
-			const width = getWidth(s);
-			const diff = max - width;
-			if (diff > 0) {
-				if (options.collapseWhitespace) {
-					this.collapsableWhitespace = diff;
-				}
-
-				if (options.padDirection === 'left') {
-					s = padLeft(s, max, undefined, width);
-				} else {
-					if (options.collapseWhitespace) {
-						max -= diff;
-					}
-					s = padRight(s, max, undefined, width);
-				}
-			} else if (diff < 0) {
-				s = truncate(s, max, undefined, width);
-			}
+			return options.suffix ? `${s}${options.suffix}` : s;
 		}
 
-		if (options.prefix || options.suffix) {
-			s = `${options.prefix ?? ''}${s}${options.suffix ?? ''}`;
+		max += this.collapsableWhitespace;
+		this.collapsableWhitespace = 0;
+
+		const r = getTruncatedWidth(s, max, suffixWidth + 1);
+		if (r.truncated) return `${s.slice(0, r.index)}${r.ellipsed ? '\u2026' : ''}${options.suffix ?? ''}`;
+
+		let width = r.width;
+		if (options.suffix) {
+			s += options.suffix;
+			width += suffixWidth;
 		}
 
-		return s;
+		if (width === max) return s;
+
+		if (options.collapseWhitespace) {
+			this.collapsableWhitespace = max - width;
+		}
+
+		if (options.padDirection === 'left') {
+			return s.padStart(max, '\u00a0');
+		}
+
+		if (options.collapseWhitespace) return s;
+
+		return s.padEnd(max, '\u00a0');
 	}
 
 	private static _formatter: Formatter | undefined = undefined;
@@ -115,21 +119,21 @@ export abstract class Formatter<Item = any, Options extends FormatOptions = Form
 
 		let options: Options | undefined = undefined;
 		if (dateFormatOrOptions == null || typeof dateFormatOrOptions === 'string') {
-			// eslint-disable-next-line @typescript-eslint/consistent-type-assertions
 			options = {
 				dateFormat: dateFormatOrOptions,
-			} as Options;
+			} as unknown as Options;
 		} else {
 			options = dateFormatOrOptions;
 		}
 
 		if (options.tokenOptions == null) {
-			const tokenOptions = getTokensFromTemplate(template).reduce<{
-				[token: string]: TokenOptions | undefined;
-			}>((map, token) => {
-				map[token.key] = token.options;
-				return map;
-			}, Object.create(null));
+			const tokenOptions = getTokensFromTemplate(template).reduce<Record<string, TokenOptions | undefined>>(
+				(map, token) => {
+					map[token.key] = token.options;
+					return map;
+				},
+				Object.create(null),
+			);
 
 			options.tokenOptions = tokenOptions;
 		}
@@ -159,21 +163,21 @@ export abstract class Formatter<Item = any, Options extends FormatOptions = Form
 
 		let options: Options | undefined = undefined;
 		if (dateFormatOrOptions == null || typeof dateFormatOrOptions === 'string') {
-			// eslint-disable-next-line @typescript-eslint/consistent-type-assertions
 			options = {
 				dateFormat: dateFormatOrOptions,
-			} as Options;
+			} as unknown as Options;
 		} else {
 			options = dateFormatOrOptions;
 		}
 
 		if (options.tokenOptions == null) {
-			const tokenOptions = getTokensFromTemplate(template).reduce<{
-				[token: string]: TokenOptions | undefined;
-			}>((map, token) => {
-				map[token.key] = token.options;
-				return map;
-			}, Object.create(null));
+			const tokenOptions = getTokensFromTemplate(template).reduce<Record<string, TokenOptions | undefined>>(
+				(map, token) => {
+					map[token.key] = token.options;
+					return map;
+				},
+				Object.create(null),
+			);
 
 			options.tokenOptions = tokenOptions;
 		}

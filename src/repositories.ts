@@ -1,11 +1,12 @@
-import { Uri } from 'vscode';
+import type { Uri } from 'vscode';
 import { isLinux } from '@env/platform';
 import { Schemes } from './constants';
-import { Repository } from './git/models/repository';
-import { addVslsPrefixIfNeeded, normalizePath } from './system/path';
+import type { RevisionUriData } from './git/gitProvider';
+import { decodeGitLensRevisionUriAuthority } from './git/gitUri.authority';
+import type { Repository } from './git/models/repository';
+import { normalizePath } from './system/path';
 import { UriTrie } from './system/trie';
-// TODO@eamodio don't import from string here since it will break the tests because of ESM dependencies
-// import { CharCode } from './string';
+import { addVslsPrefixIfNeeded } from './system/vscode/path';
 
 const slash = 47; //CharCode.Slash;
 
@@ -24,7 +25,6 @@ export function normalizeRepoUri(uri: Uri): { path: string; ignoreCase: boolean 
 			return { path: path, ignoreCase: !isLinux };
 
 		case Schemes.Git:
-		case Schemes.GitLens:
 			path = uri.path;
 			if (path.charCodeAt(path.length - 1) === slash) {
 				path = path.slice(1, -1);
@@ -33,22 +33,38 @@ export function normalizeRepoUri(uri: Uri): { path: string; ignoreCase: boolean 
 			}
 			return { path: path, ignoreCase: !isLinux };
 
+		case Schemes.GitLens: {
+			path = uri.path;
+
+			const metadata = decodeGitLensRevisionUriAuthority<RevisionUriData>(uri.authority);
+			if (metadata.uncPath != null && !path.startsWith(metadata.uncPath)) {
+				path = `${metadata.uncPath}${uri.path}`;
+			}
+
+			if (path.charCodeAt(path.length - 1) === slash) {
+				path = path.slice(1, -1);
+			} else {
+				path = path.startsWith('//') ? path : path.slice(1);
+			}
+			return { path: path, ignoreCase: !isLinux };
+		}
 		case Schemes.Virtual:
 		case Schemes.GitHub: {
 			path = uri.path;
 			if (path.charCodeAt(path.length - 1) === slash) {
-				path = path.slice(0, -1);
+				path = path.slice(1, -1);
+			} else {
+				path = path.slice(1);
 			}
 
 			// TODO@eamodio Revisit this, as we can't strip off the authority details (e.g. metadata) ultimately (since you in theory could have a workspace with more than 1 virtual repo which are the same except for the authority)
 			const authority = uri.authority?.split('+', 1)[0];
-			return { path: authority ? `${authority}${path}` : path.slice(1), ignoreCase: false };
+			return { path: authority ? `${authority}/${path}` : path, ignoreCase: false };
 		}
 		case Schemes.Vsls:
 		case Schemes.VslsScc:
 			// Check if this is a root live share folder, if so add the required prefix (required to match repos correctly)
 			path = addVslsPrefixIfNeeded(uri.path);
-
 			if (path.charCodeAt(path.length - 1) === slash) {
 				path = path.slice(1, -1);
 			} else {
@@ -57,6 +73,21 @@ export function normalizeRepoUri(uri: Uri): { path: string; ignoreCase: boolean 
 
 			return { path: path, ignoreCase: false };
 
+		case Schemes.PRs: {
+			path = uri.path;
+			if (path.charCodeAt(path.length - 1) === slash) {
+				path = path.slice(1, -1);
+			} else {
+				path = path.slice(1);
+			}
+
+			const authority = uri.authority?.split('+', 1)[0];
+			if (authority === Schemes.GitHub) {
+				return { path: authority ? `${authority}/${path}` : path, ignoreCase: false };
+			}
+
+			return { path: path, ignoreCase: !isLinux };
+		}
 		default:
 			path = uri.path;
 			if (path.charCodeAt(path.length - 1) === slash) {
@@ -111,8 +142,8 @@ export class Repositories {
 		return this._trie.has(uri);
 	}
 
-	remove(uri: Uri): boolean {
-		const deleted = this._trie.delete(uri);
+	remove(uri: Uri, dispose: boolean = true): boolean {
+		const deleted = this._trie.delete(uri, dispose);
 		if (deleted) {
 			this._count--;
 		}

@@ -1,240 +1,321 @@
-import { ConfigurationTarget, MessageItem, window } from 'vscode';
-import { configuration } from './configuration';
-import { Commands } from './constants';
-import { GitCommit } from './git/models';
-import { Logger } from './logger';
-import { executeCommand } from './system/command';
+import type { MessageItem } from 'vscode';
+import { ConfigurationTarget, window } from 'vscode';
+import type { SuppressedMessages } from './config';
+import { urls } from './constants';
+import { GlCommand } from './constants.commands';
+import type { BlameIgnoreRevsFileError } from './git/errors';
+import { BlameIgnoreRevsFileBadRevisionError } from './git/errors';
+import type { GitCommit } from './git/models/commit';
+import { createMarkdownCommandLink } from './system/commands';
+import { Logger } from './system/logger';
+import { executeCommand, executeCoreCommand } from './system/vscode/command';
+import { configuration } from './system/vscode/configuration';
+import { openUrl } from './system/vscode/utils';
 
-export const enum SuppressedMessages {
-	CommitHasNoPreviousCommitWarning = 'suppressCommitHasNoPreviousCommitWarning',
-	CommitNotFoundWarning = 'suppressCommitNotFoundWarning',
-	CreatePullRequestPrompt = 'suppressCreatePullRequestPrompt',
-	SuppressDebugLoggingWarning = 'suppressDebugLoggingWarning',
-	FileNotUnderSourceControlWarning = 'suppressFileNotUnderSourceControlWarning',
-	GitDisabledWarning = 'suppressGitDisabledWarning',
-	GitMissingWarning = 'suppressGitMissingWarning',
-	GitVersionWarning = 'suppressGitVersionWarning',
-	LineUncommittedWarning = 'suppressLineUncommittedWarning',
-	NoRepositoryWarning = 'suppressNoRepositoryWarning',
-	RebaseSwitchToTextWarning = 'suppressRebaseSwitchToTextWarning',
+export function showBlameInvalidIgnoreRevsFileWarningMessage(
+	ex: BlameIgnoreRevsFileError | BlameIgnoreRevsFileBadRevisionError,
+): Promise<MessageItem | undefined> {
+	if (ex instanceof BlameIgnoreRevsFileBadRevisionError) {
+		return showMessage(
+			'error',
+			`Unable to show blame. Invalid revision (${ex.revision}) specified in the blame.ignoreRevsFile in your Git config.`,
+			'suppressBlameInvalidIgnoreRevsFileBadRevisionWarning',
+		);
+	}
+
+	return showMessage(
+		'error',
+		`Unable to show blame. Invalid or missing blame.ignoreRevsFile (${ex.fileName}) specified in your Git config.`,
+		'suppressBlameInvalidIgnoreRevsFileWarning',
+	);
 }
 
-export class Messages {
-	static showCommitHasNoPreviousCommitWarningMessage(commit?: GitCommit): Promise<MessageItem | undefined> {
-		if (commit == null) {
-			return Messages.showMessage(
-				'info',
-				'There is no previous commit.',
-				SuppressedMessages.CommitHasNoPreviousCommitWarning,
-			);
-		}
-		return Messages.showMessage(
-			'info',
-			`Commit ${commit.shortSha} (${commit.author.name}, ${commit.formattedDate}) has no previous commit.`,
-			SuppressedMessages.CommitHasNoPreviousCommitWarning,
-		);
+export function showCommitHasNoPreviousCommitWarningMessage(commit?: GitCommit): Promise<MessageItem | undefined> {
+	if (commit == null) {
+		return showMessage('info', 'There is no previous commit.', 'suppressCommitHasNoPreviousCommitWarning');
 	}
+	return showMessage(
+		'info',
+		`Commit ${commit.shortSha} (${commit.author.name}, ${commit.formattedDate}) has no previous commit.`,
+		'suppressCommitHasNoPreviousCommitWarning',
+	);
+}
 
-	static showCommitNotFoundWarningMessage(message: string): Promise<MessageItem | undefined> {
-		return Messages.showMessage(
-			'warn',
-			`${message}. The commit could not be found.`,
-			SuppressedMessages.CommitNotFoundWarning,
-		);
-	}
+export function showCommitNotFoundWarningMessage(message: string): Promise<MessageItem | undefined> {
+	return showMessage('warn', `${message}. The commit could not be found.`, 'suppressCommitNotFoundWarning');
+}
 
-	static async showCreatePullRequestPrompt(branch: string): Promise<boolean> {
-		const create = { title: 'Create Pull Request...' };
-		const result = await Messages.showMessage(
-			'info',
-			`Would you like to create a Pull Request for branch '${branch}'?`,
-			SuppressedMessages.CreatePullRequestPrompt,
-			{ title: "Don't Show Again" },
-			create,
-		);
-		return result === create;
-	}
+export async function showCreatePullRequestPrompt(branch: string): Promise<boolean> {
+	const create = { title: 'Create Pull Request...' };
+	const result = await showMessage(
+		'info',
+		`Would you like to create a Pull Request for branch '${branch}'?`,
+		'suppressCreatePullRequestPrompt',
+		{ title: "Don't Show Again" },
+		create,
+	);
+	return result === create;
+}
 
-	static async showDebugLoggingWarningMessage(): Promise<boolean> {
-		const disable = { title: 'Disable Debug Logging' };
-		const result = await Messages.showMessage(
-			'warn',
-			'GitLens debug logging is currently enabled. Unless you are reporting an issue, it is recommended to be disabled. Would you like to disable it?',
-			SuppressedMessages.SuppressDebugLoggingWarning,
-			{ title: "Don't Show Again" },
-			disable,
-		);
+export async function showDebugLoggingWarningMessage(): Promise<boolean> {
+	const disable = { title: 'Disable Debug Logging' };
+	const result = await showMessage(
+		'warn',
+		'GitLens debug logging is currently enabled. Unless you are reporting an issue, it is recommended to be disabled. Would you like to disable it?',
+		'suppressDebugLoggingWarning',
+		{ title: "Don't Show Again" },
+		disable,
+	);
 
-		return result === disable;
-	}
+	return result === disable;
+}
 
-	static async showGenericErrorMessage(message: string): Promise<MessageItem | undefined> {
-		const actions: MessageItem[] = [{ title: 'Open Output Channel' }];
-		const result = await Messages.showMessage(
-			'error',
-			`${message}. See output channel for more details`,
-			undefined,
-			null,
-			...actions,
-		);
+export async function showGenericErrorMessage(message: string): Promise<void> {
+	if (Logger.enabled('error')) {
+		const result = await showMessage('error', `${message}. See output channel for more details.`, undefined, null, {
+			title: 'Open Output Channel',
+		});
 
-		if (result !== undefined) {
+		if (result != null) {
 			Logger.showOutputChannel();
 		}
-		return result;
-	}
-
-	static showFileNotUnderSourceControlWarningMessage(message: string): Promise<MessageItem | undefined> {
-		return Messages.showMessage(
-			'warn',
-			`${message}. The file is probably not under source control.`,
-			SuppressedMessages.FileNotUnderSourceControlWarning,
-		);
-	}
-
-	static showGitDisabledErrorMessage() {
-		return Messages.showMessage(
+	} else {
+		const result = await showMessage(
 			'error',
-			'GitLens requires Git to be enabled. Please re-enable Git \u2014 set `git.enabled` to true and reload.',
-			SuppressedMessages.GitDisabledWarning,
-		);
-	}
-
-	static showGitInvalidConfigErrorMessage() {
-		return Messages.showMessage(
-			'error',
-			'GitLens is unable to use Git. Your Git configuration seems to be invalid. Please resolve any issues with your Git configuration and reload.',
-		);
-	}
-
-	static showGitMissingErrorMessage() {
-		return Messages.showMessage(
-			'error',
-			"GitLens was unable to find Git. Please make sure Git is installed. Also ensure that Git is either in the PATH, or that 'git.path' is pointed to its installed location.",
-			SuppressedMessages.GitMissingWarning,
-		);
-	}
-
-	static showGitVersionUnsupportedErrorMessage(version: string, required: string): Promise<MessageItem | undefined> {
-		return Messages.showMessage(
-			'error',
-			`GitLens requires a newer version of Git (>= ${required}) than is currently installed (${version}). Please install a more recent version of Git.`,
-			SuppressedMessages.GitVersionWarning,
-		);
-	}
-
-	static showInsidersErrorMessage() {
-		return Messages.showMessage(
-			'error',
-			'GitLens (Insiders) cannot be used while GitLens is also enabled. Please ensure that only one version is enabled.',
-			SuppressedMessages.GitDisabledWarning,
-		);
-	}
-
-	static showLineUncommittedWarningMessage(message: string): Promise<MessageItem | undefined> {
-		return Messages.showMessage(
-			'warn',
-			`${message}. The line has uncommitted changes.`,
-			SuppressedMessages.LineUncommittedWarning,
-		);
-	}
-
-	static showNoRepositoryWarningMessage(message: string): Promise<MessageItem | undefined> {
-		return Messages.showMessage(
-			'warn',
-			`${message}. No repository could be found.`,
-			SuppressedMessages.NoRepositoryWarning,
-		);
-	}
-
-	static showRebaseSwitchToTextWarningMessage(): Promise<MessageItem | undefined> {
-		return Messages.showMessage(
-			'warn',
-			'Closing either the git-rebase-todo file or the Rebase Editor will start the rebase.',
-			SuppressedMessages.RebaseSwitchToTextWarning,
-		);
-	}
-
-	static async showWhatsNewMessage(version: string) {
-		const whatsnew = { title: "See What's New" };
-		const result = await Messages.showMessage(
-			'info',
-			`GitLens ${version} is here — check out what's new!`,
+			`${message}. If the error persists, please enable debug logging and try again.`,
 			undefined,
 			null,
-			whatsnew,
+			{
+				title: 'Enable Debug Logging',
+			},
 		);
 
-		if (result === whatsnew) {
-			void (await executeCommand(Commands.ShowWelcomePage));
+		if (result != null) {
+			void executeCommand(GlCommand.EnableDebugLogging);
 		}
 	}
+}
 
-	private static async showMessage(
-		type: 'info' | 'warn' | 'error',
-		message: string,
-		suppressionKey?: SuppressedMessages,
-		dontShowAgain: MessageItem | null = { title: "Don't Show Again" },
-		...actions: MessageItem[]
-	): Promise<MessageItem | undefined> {
-		Logger.log(`ShowMessage(${type}, '${message}', ${suppressionKey}, ${JSON.stringify(dontShowAgain)})`);
+export function showFileNotUnderSourceControlWarningMessage(message: string): Promise<MessageItem | undefined> {
+	return showMessage(
+		'warn',
+		`${message}. The file is probably not under source control.`,
+		'suppressFileNotUnderSourceControlWarning',
+	);
+}
 
-		if (suppressionKey !== undefined && configuration.get(`advanced.messages.${suppressionKey}` as const)) {
-			Logger.log(
-				`ShowMessage(${type}, '${message}', ${suppressionKey}, ${JSON.stringify(dontShowAgain)}) skipped`,
-			);
-			return undefined;
-		}
+export function showGitDisabledErrorMessage() {
+	return showMessage(
+		'error',
+		'GitLens requires Git to be enabled. Please re-enable Git \u2014 set `git.enabled` to true and reload.',
+		'suppressGitDisabledWarning',
+	);
+}
 
-		if (suppressionKey !== undefined && dontShowAgain !== null) {
-			actions.push(dontShowAgain);
-		}
+export function showGitInvalidConfigErrorMessage() {
+	return showMessage(
+		'error',
+		'GitLens is unable to use Git. Your Git configuration seems to be invalid. Please resolve any issues with your Git configuration and reload.',
+	);
+}
 
-		let result: MessageItem | undefined = undefined;
-		switch (type) {
-			case 'info':
-				result = await window.showInformationMessage(message, ...actions);
-				break;
+export function showGitMissingErrorMessage() {
+	return showMessage(
+		'error',
+		"GitLens was unable to find Git. Please make sure Git is installed. Also ensure that Git is either in the PATH, or that 'git.path' is pointed to its installed location.",
+		'suppressGitMissingWarning',
+	);
+}
 
-			case 'warn':
-				result = await window.showWarningMessage(message, ...actions);
-				break;
+export function showGitVersionUnsupportedErrorMessage(
+	version: string,
+	required: string,
+): Promise<MessageItem | undefined> {
+	return showMessage(
+		'error',
+		`GitLens requires a newer version of Git (>= ${required}) than is currently installed (${version}). Please install a more recent version of Git.`,
+		'suppressGitVersionWarning',
+	);
+}
 
-			case 'error':
-				result = await window.showErrorMessage(message, ...actions);
-				break;
-		}
+export async function showPreReleaseExpiredErrorMessage(version: string) {
+	const upgrade = { title: 'Upgrade' };
+	const switchToRelease = { title: 'Switch to Release Version' };
+	const result = await showMessage(
+		'error',
+		`This pre-release version (${version}) of GitLens has expired. Please upgrade to a more recent pre-release, or switch to the release version.`,
+		undefined,
+		null,
+		upgrade,
+	);
 
-		if ((suppressionKey !== undefined && dontShowAgain === null) || result === dontShowAgain) {
-			Logger.log(
-				`ShowMessage(${type}, '${message}', ${suppressionKey}, ${JSON.stringify(
-					dontShowAgain,
-				)}) don't show again requested`,
-			);
-			await this.suppressedMessage(suppressionKey!);
+	if (result === upgrade) {
+		void executeCoreCommand('workbench.extensions.installExtension', 'eamodio.gitlens', {
+			installPreReleaseVersion: true,
+		});
+	} else if (result === switchToRelease) {
+		void executeCoreCommand('workbench.extensions.action.switchToRelease', 'eamodio.gitlens');
+	}
+}
 
-			if (result === dontShowAgain) return undefined;
-		}
+export function showLineUncommittedWarningMessage(message: string): Promise<MessageItem | undefined> {
+	return showMessage('warn', `${message}. The line has uncommitted changes.`, 'suppressLineUncommittedWarning');
+}
 
+export function showNoRepositoryWarningMessage(message: string): Promise<MessageItem | undefined> {
+	return showMessage('warn', `${message}. No repository could be found.`, 'suppressNoRepositoryWarning');
+}
+
+export function showRebaseSwitchToTextWarningMessage(): Promise<MessageItem | undefined> {
+	return showMessage(
+		'warn',
+		'Closing either the git-rebase-todo file or the Rebase Editor will start the rebase.',
+		'suppressRebaseSwitchToTextWarning',
+	);
+}
+
+export function showGkDisconnectedTooManyFailedRequestsWarningMessage(): Promise<MessageItem | undefined> {
+	return showMessage(
+		'error',
+		`Requests to GitKraken have stopped being sent for this session, because of too many failed requests.`,
+		'suppressGkDisconnectedTooManyFailedRequestsWarningMessage',
+		undefined,
+		{
+			title: 'OK',
+		},
+	);
+}
+
+export function showGkRequestFailed500WarningMessage(message: string): Promise<MessageItem | undefined> {
+	return showMessage('error', message, 'suppressGkRequestFailed500Warning', undefined, {
+		title: 'OK',
+	});
+}
+
+export function showGkRequestTimedOutWarningMessage(): Promise<MessageItem | undefined> {
+	return showMessage('error', `GitKraken request timed out.`, 'suppressGkRequestTimedOutWarning', undefined, {
+		title: 'OK',
+	});
+}
+
+export function showIntegrationDisconnectedTooManyFailedRequestsWarningMessage(
+	providerName: string,
+): Promise<MessageItem | undefined> {
+	return showMessage(
+		'error',
+		`Rich integration with ${providerName} has been disconnected for this session, because of too many failed requests.`,
+		'suppressIntegrationDisconnectedTooManyFailedRequestsWarning',
+		undefined,
+		{
+			title: 'OK',
+		},
+	);
+}
+
+export function showIntegrationRequestFailed500WarningMessage(message: string): Promise<MessageItem | undefined> {
+	return showMessage('error', message, 'suppressIntegrationRequestFailed500Warning', undefined, {
+		title: 'OK',
+	});
+}
+
+export function showIntegrationRequestTimedOutWarningMessage(providerName: string): Promise<MessageItem | undefined> {
+	return showMessage(
+		'error',
+		`${providerName} request timed out.`,
+		'suppressIntegrationRequestTimedOutWarning',
+		undefined,
+		{
+			title: 'OK',
+		},
+	);
+}
+
+export async function showWhatsNewMessage(majorVersion: string) {
+	const confirm = { title: 'OK', isCloseAffordance: true };
+	const releaseNotes = { title: 'View Release Notes' };
+	const result = await showMessage(
+		'info',
+		`Upgraded to GitLens ${majorVersion}${
+			majorVersion === '16'
+				? ` with an all new [Home view](${createMarkdownCommandLink(GlCommand.ShowHomeView, {
+						source: 'whatsnew',
+				  })} "Show Home view") reimagined as a hub for your current, future, and recent work, [consolidated Source Control views](command:gitlens.views.scm.grouped.focus "Show GitLens view"), and much more.`
+				: " — see what's new."
+		}`,
+		undefined,
+		null,
+		releaseNotes,
+		confirm,
+	);
+
+	if (result === releaseNotes) {
+		void openUrl(urls.releaseNotes);
+	}
+}
+
+export async function showMessage(
+	type: 'info' | 'warn' | 'error',
+	message: string,
+	suppressionKey?: SuppressedMessages,
+	dontShowAgain: MessageItem | null = { title: "Don't Show Again" },
+	...actions: MessageItem[]
+): Promise<MessageItem | undefined> {
+	Logger.log(`ShowMessage(${type}, '${message}', ${suppressionKey}, ${JSON.stringify(dontShowAgain)})`);
+
+	if (suppressionKey != null && configuration.get(`advanced.messages.${suppressionKey}` as const)) {
+		Logger.log(`ShowMessage(${type}, '${message}', ${suppressionKey}, ${JSON.stringify(dontShowAgain)}) skipped`);
+		return undefined;
+	}
+
+	if (suppressionKey != null && dontShowAgain !== null) {
+		actions.push(dontShowAgain);
+	}
+
+	let result: MessageItem | undefined = undefined;
+	switch (type) {
+		case 'info':
+			result = await window.showInformationMessage(message, ...actions);
+			break;
+
+		case 'warn':
+			result = await window.showWarningMessage(message, ...actions);
+			break;
+
+		case 'error':
+			result = await window.showErrorMessage(message, ...actions);
+			break;
+	}
+
+	if (suppressionKey != null && (dontShowAgain === null || result === dontShowAgain)) {
 		Logger.log(
-			`ShowMessage(${type}, '${message}', ${suppressionKey}, ${JSON.stringify(dontShowAgain)}) returned ${
-				result != null ? result.title : result
-			}`,
+			`ShowMessage(${type}, '${message}', ${suppressionKey}, ${JSON.stringify(
+				dontShowAgain,
+			)}) don't show again requested`,
 		);
-		return result;
+		await suppressedMessage(suppressionKey);
+
+		if (result === dontShowAgain) return undefined;
 	}
 
-	private static suppressedMessage(suppressionKey: SuppressedMessages) {
-		const messages = { ...configuration.get('advanced.messages') };
+	Logger.log(
+		`ShowMessage(${type}, '${message}', ${suppressionKey}, ${JSON.stringify(dontShowAgain)}) returned ${
+			result != null ? result.title : result
+		}`,
+	);
+	return result;
+}
 
-		messages[suppressionKey] = true;
+function suppressedMessage(suppressionKey: SuppressedMessages) {
+	const messages = { ...configuration.get('advanced.messages') };
 
-		for (const [key, value] of Object.entries(messages)) {
-			if (value !== true) {
-				delete messages[key as keyof typeof messages];
-			}
+	messages[suppressionKey] = true;
+
+	for (const [key, value] of Object.entries(messages)) {
+		if (value !== true) {
+			// eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+			delete messages[key as keyof typeof messages];
 		}
-
-		return configuration.update('advanced.messages', messages, ConfigurationTarget.Global);
 	}
+
+	return configuration.update('advanced.messages', messages, ConfigurationTarget.Global);
 }

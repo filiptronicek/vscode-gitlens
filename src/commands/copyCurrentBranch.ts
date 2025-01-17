@@ -1,16 +1,18 @@
-import { env, TextEditor, Uri, window } from 'vscode';
-import { Commands } from '../constants';
+import type { TextEditor, Uri } from 'vscode';
+import { env } from 'vscode';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { GitUri } from '../git/gitUri';
-import { Logger } from '../logger';
-import { RepositoryPicker } from '../quickpicks/repositoryPicker';
-import { command } from '../system/command';
+import { showGenericErrorMessage } from '../messages';
+import { getBestRepositoryOrShowPicker } from '../quickpicks/repositoryPicker';
+import { Logger } from '../system/logger';
+import { command } from '../system/vscode/command';
 import { ActiveEditorCommand, getCommandUri } from './base';
 
 @command()
 export class CopyCurrentBranchCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super(Commands.CopyCurrentBranch);
+		super(GlCommand.CopyCurrentBranch);
 	}
 
 	async execute(editor?: TextEditor, uri?: Uri) {
@@ -18,17 +20,17 @@ export class CopyCurrentBranchCommand extends ActiveEditorCommand {
 
 		const gitUri = uri != null ? await GitUri.fromUri(uri) : undefined;
 
-		const repository = await RepositoryPicker.getBestRepositoryOrShow(gitUri, editor, 'Copy Current Branch Name');
+		const repository = await getBestRepositoryOrShowPicker(gitUri, editor, 'Copy Current Branch Name');
 		if (repository == null) return;
 
 		try {
-			const branch = await repository.getBranch();
+			const branch = await repository.git.branches().getBranch();
 			if (branch?.name) {
 				await env.clipboard.writeText(branch.name);
 			}
 		} catch (ex) {
 			Logger.error(ex, 'CopyCurrentBranchCommand');
-			void window.showErrorMessage('Unable to copy current branch name. See output channel for more details');
+			void showGenericErrorMessage('Unable to copy current branch name');
 		}
 	}
 }

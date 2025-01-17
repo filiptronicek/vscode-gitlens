@@ -1,8 +1,7 @@
-import { DateStyle } from '../../config';
-import { Container } from '../../container';
+import type { Container } from '../../container';
 import { formatDate, fromNow } from '../../system/date';
 import { memoize } from '../../system/decorators/memoize';
-import { GitRevision } from './reference';
+import { shortenRevision } from './revision.utils';
 
 export interface GitReflog {
 	readonly repoPath: string;
@@ -19,6 +18,7 @@ export class GitReflogRecord {
 	private _previousSha: string | undefined;
 
 	constructor(
+		private readonly container: Container,
 		public readonly repoPath: string,
 		public readonly sha: string,
 		private _selector: string,
@@ -38,8 +38,8 @@ export class GitReflogRecord {
 	}
 
 	get formattedDate(): string {
-		return Container.instance.CommitDateFormatting.dateStyle === DateStyle.Absolute
-			? this.formatDate(Container.instance.CommitDateFormatting.dateFormat)
+		return this.container.CommitDateFormatting.dateStyle === 'absolute'
+			? this.formatDate(this.container.CommitDateFormatting.dateFormat)
 			: this.formatDateFromNow();
 	}
 
@@ -48,11 +48,11 @@ export class GitReflogRecord {
 		if (this._selector == null || this._selector.length === 0) return '';
 
 		if (this._selector.startsWith('refs/heads')) {
-			return this._selector.substr(11);
+			return this._selector.substring(11);
 		}
 
 		if (this._selector.startsWith('refs/remotes')) {
-			return this._selector.substr(13);
+			return this._selector.substring(13);
 		}
 
 		return this._selector;
@@ -64,7 +64,7 @@ export class GitReflogRecord {
 
 	@memoize()
 	get previousShortSha() {
-		return GitRevision.shorten(this._previousSha);
+		return shortenRevision(this._previousSha);
 	}
 
 	get selector() {
@@ -73,7 +73,7 @@ export class GitReflogRecord {
 
 	@memoize()
 	get shortSha() {
-		return GitRevision.shorten(this.sha);
+		return shortenRevision(this.sha);
 	}
 
 	update(previousSha?: string, selector?: string) {

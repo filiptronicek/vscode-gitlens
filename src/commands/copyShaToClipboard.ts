@@ -1,14 +1,17 @@
-import { env, TextEditor, Uri } from 'vscode';
-import { Commands } from '../constants';
+import type { TextEditor, Uri } from 'vscode';
+import { env } from 'vscode';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { GitUri } from '../git/gitUri';
-import { Logger } from '../logger';
-import { Messages } from '../messages';
-import { command } from '../system/command';
+import { shortenRevision } from '../git/models/revision.utils';
+import { showGenericErrorMessage } from '../messages';
 import { first } from '../system/iterable';
+import { Logger } from '../system/logger';
+import { command } from '../system/vscode/command';
+import { configuration } from '../system/vscode/configuration';
+import type { CommandContext } from './base';
 import {
 	ActiveEditorCommand,
-	CommandContext,
 	getCommandUri,
 	isCommandContextViewNodeHasBranch,
 	isCommandContextViewNodeHasCommit,
@@ -22,15 +25,13 @@ export interface CopyShaToClipboardCommandArgs {
 @command()
 export class CopyShaToClipboardCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super(Commands.CopyShaToClipboard);
+		super(GlCommand.CopyShaToClipboard);
 	}
 
 	protected override preExecute(context: CommandContext, args?: CopyShaToClipboardCommandArgs) {
 		if (isCommandContextViewNodeHasCommit(context)) {
 			args = { ...args };
-			args.sha = this.container.config.advanced.abbreviateShaOnCopy
-				? context.node.commit.shortSha
-				: context.node.commit.sha;
+			args.sha = context.node.commit.sha;
 			return this.execute(
 				context.editor,
 				context.node.commit.file?.uri ?? context.node.commit.getRepository()?.uri,
@@ -63,7 +64,8 @@ export class CopyShaToClipboardCommand extends ActiveEditorCommand {
 					const log = await this.container.git.getLog(repoPath, { limit: 1 });
 					if (log == null) return;
 
-					args.sha = first(log.commits.values()).sha;
+					args.sha = first(log.commits.values())?.sha;
+					if (args.sha == null) return;
 				} else if (args.sha == null) {
 					const blameline = editor?.selection.active.line ?? 0;
 					if (blameline < 0) return;
@@ -76,17 +78,19 @@ export class CopyShaToClipboardCommand extends ActiveEditorCommand {
 						args.sha = blame.commit.sha;
 					} catch (ex) {
 						Logger.error(ex, 'CopyShaToClipboardCommand', `getBlameForLine(${blameline})`);
-						void Messages.showGenericErrorMessage('Unable to copy commit SHA');
+						void showGenericErrorMessage('Unable to copy commit SHA');
 
 						return;
 					}
 				}
 			}
 
-			void (await env.clipboard.writeText(args.sha));
+			await env.clipboard.writeText(
+				configuration.get('advanced.abbreviateShaOnCopy') ? shortenRevision(args.sha) : args.sha,
+			);
 		} catch (ex) {
 			Logger.error(ex, 'CopyShaToClipboardCommand');
-			void Messages.showGenericErrorMessage('Unable to copy commit SHA');
+			void showGenericErrorMessage('Unable to copy commit SHA');
 		}
 	}
 }

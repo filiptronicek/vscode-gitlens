@@ -1,22 +1,40 @@
-import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState } from 'vscode';
-import type { DiffWithCommandArgs } from '../../commands';
-import { Commands, CoreCommands, GlyphChars } from '../../constants';
-import { CommitFormatter } from '../../git/formatters';
+import type { CancellationToken, Command } from 'vscode';
+import { MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState } from 'vscode';
+import type { DiffWithCommandArgs } from '../../commands/diffWith';
+import { GlyphChars } from '../../constants';
+import { GlCommand } from '../../constants.commands';
 import { GitUri } from '../../git/gitUri';
-import { GitFile, GitMergeStatus, GitRebaseStatus, GitReference } from '../../git/models';
-import { FileHistoryView } from '../fileHistoryView';
-import { LineHistoryView } from '../lineHistoryView';
-import { ViewsWithCommits } from '../viewBase';
-import { ContextValues, ViewNode } from './viewNode';
+import type { GitCommit } from '../../git/models/commit';
+import type { GitFile } from '../../git/models/file';
+import type { GitPausedOperationStatus } from '../../git/models/pausedOperationStatus';
+import { getReferenceLabel } from '../../git/models/reference.utils';
+import { createCommand, createCoreCommand } from '../../system/vscode/command';
+import { configuration } from '../../system/vscode/configuration';
+import type { FileHistoryView } from '../fileHistoryView';
+import type { LineHistoryView } from '../lineHistoryView';
+import type { ViewsWithCommits } from '../viewBase';
+import { ContextValues, ViewNode } from './abstract/viewNode';
+import { getFileRevisionAsCommitTooltip } from './fileRevisionAsCommitNode';
 
-export class MergeConflictCurrentChangesNode extends ViewNode<ViewsWithCommits | FileHistoryView | LineHistoryView> {
+export class MergeConflictCurrentChangesNode extends ViewNode<
+	'conflict-current-changes',
+	ViewsWithCommits | FileHistoryView | LineHistoryView
+> {
 	constructor(
 		view: ViewsWithCommits | FileHistoryView | LineHistoryView,
-		parent: ViewNode,
-		private readonly status: GitMergeStatus | GitRebaseStatus,
+		protected override readonly parent: ViewNode,
+		private readonly status: GitPausedOperationStatus,
 		private readonly file: GitFile,
 	) {
-		super(GitUri.fromFile(file, status.repoPath, 'HEAD'), view, parent);
+		super('conflict-current-changes', GitUri.fromFile(file, status.repoPath, 'HEAD'), view, parent);
+	}
+
+	private _commit: Promise<GitCommit | undefined> | undefined;
+	private async getCommit(): Promise<GitCommit | undefined> {
+		if (this._commit == null) {
+			this._commit = this.view.container.git.getCommit(this.status.repoPath, 'HEAD');
+		}
+		return this._commit;
 	}
 
 	getChildren(): ViewNode[] {
@@ -24,57 +42,32 @@ export class MergeConflictCurrentChangesNode extends ViewNode<ViewsWithCommits |
 	}
 
 	async getTreeItem(): Promise<TreeItem> {
-		const commit = await this.view.container.git.getCommit(this.status.repoPath, 'HEAD');
+		const commit = await this.getCommit();
 
 		const item = new TreeItem('Current changes', TreeItemCollapsibleState.None);
 		item.contextValue = ContextValues.MergeConflictCurrentChanges;
-		item.description = `${GitReference.toString(this.status.current, { expand: false, icon: false })}${
-			commit != null ? ` (${GitReference.toString(commit, { expand: false, icon: false })})` : ' (HEAD)'
+		item.description = `${getReferenceLabel(this.status.current, { expand: false, icon: false })}${
+			commit != null ? ` (${getReferenceLabel(commit, { expand: false, icon: false })})` : ' (HEAD)'
 		}`;
 		item.iconPath = this.view.config.avatars
-			? (await commit?.getAvatarUri({ defaultStyle: this.view.container.config.defaultGravatarsStyle })) ??
+			? (await commit?.getAvatarUri({ defaultStyle: configuration.get('defaultGravatarsStyle') })) ??
 			  new ThemeIcon('diff')
 			: new ThemeIcon('diff');
-
-		const markdown = new MarkdownString(
-			`Current changes to $(file)${GlyphChars.Space}${this.file.path} on ${GitReference.toString(
-				this.status.current,
-			)}${
-				commit != null
-					? `\n\n${await CommitFormatter.fromTemplateAsync(
-							`\${avatar}&nbsp;__\${author}__, \${ago} &nbsp; _(\${date})_ \n\n\${message}\n\n\${link}\${' via 'pullRequest}`,
-							commit,
-							{
-								avatarSize: 16,
-								dateFormat: this.view.container.config.defaultDateFormat,
-								markdown: true,
-								// messageAutolinks: true,
-								messageIndent: 4,
-							},
-					  )}`
-					: ''
-			}`,
-			true,
-		);
-		markdown.supportHtml = true;
-		markdown.isTrusted = true;
-
-		item.tooltip = markdown;
 		item.command = this.getCommand();
 
 		return item;
 	}
 
-	override getCommand(): Command | undefined {
+	override getCommand(): Command {
 		if (this.status.mergeBase == null) {
-			return {
-				title: 'Open Revision',
-				command: CoreCommands.Open,
-				arguments: [this.view.container.git.getRevisionUri('HEAD', this.file.path, this.status.repoPath)],
-			};
+			return createCoreCommand(
+				'vscode.open',
+				'Open Revision',
+				this.view.container.git.getRevisionUri('HEAD', this.file.path, this.status.repoPath),
+			);
 		}
 
-		const commandArgs: DiffWithCommandArgs = {
+		return createCommand<[DiffWithCommandArgs]>(GlCommand.DiffWith, 'Open Changes', {
 			lhs: {
 				sha: this.status.mergeBase,
 				uri: GitUri.fromFile(this.file, this.status.repoPath, undefined, true),
@@ -83,7 +76,7 @@ export class MergeConflictCurrentChangesNode extends ViewNode<ViewsWithCommits |
 			rhs: {
 				sha: 'HEAD',
 				uri: GitUri.fromFile(this.file, this.status.repoPath),
-				title: `${this.file.path} (${GitReference.toString(this.status.current, {
+				title: `${this.file.path} (${getReferenceLabel(this.status.current, {
 					expand: false,
 					icon: false,
 				})})`,
@@ -94,11 +87,40 @@ export class MergeConflictCurrentChangesNode extends ViewNode<ViewsWithCommits |
 				preserveFocus: true,
 				preview: true,
 			},
-		};
-		return {
-			title: 'Open Changes',
-			command: Commands.DiffWith,
-			arguments: [commandArgs],
-		};
+		});
+	}
+
+	override async resolveTreeItem(item: TreeItem, token: CancellationToken): Promise<TreeItem> {
+		if (item.tooltip == null) {
+			item.tooltip = await this.getTooltip(token);
+		}
+		return item;
+	}
+
+	private async getTooltip(cancellation: CancellationToken) {
+		const commit = await this.getCommit();
+		if (cancellation.isCancellationRequested) return undefined;
+
+		const markdown = new MarkdownString(
+			`Current changes on ${getReferenceLabel(this.status.current, { label: false })}\\\n$(file)${
+				GlyphChars.Space
+			}${this.file.path}`,
+			true,
+		);
+
+		if (commit == null) return markdown;
+
+		const tooltip = await getFileRevisionAsCommitTooltip(
+			this.view.container,
+			commit,
+			this.file,
+			this.view.config.formats.commits.tooltipWithStatus,
+			{ cancellation: cancellation },
+		);
+
+		markdown.appendMarkdown(`\n\n${tooltip}`);
+		markdown.isTrusted = true;
+
+		return markdown;
 	}
 }

@@ -1,9 +1,10 @@
-import { Range, Uri } from 'vscode';
-import { DynamicAutolinkReference } from '../../annotations/autolinks';
-import { AutolinkReference } from '../../config';
-import { GitRevision } from '../models';
-import { Repository } from '../models/repository';
-import { RemoteProvider } from './provider';
+import type { Range, Uri } from 'vscode';
+import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks';
+import type { GkProviderId } from '../../gk/models/repositoryIdentities';
+import type { Repository } from '../models/repository';
+import { isSha } from '../models/revision.utils';
+import type { RemoteProviderId } from './remoteProvider';
+import { RemoteProvider } from './remoteProvider';
 
 const fileRegex = /^\/([^/]+)\/\+(.+)$/i;
 const rangeRegex = /^(\d+)$/;
@@ -32,15 +33,23 @@ export class GerritRemote extends RemoteProvider {
 		super(domain, path, protocol, name, custom);
 	}
 
+	protected override get issueLinkPattern(): string {
+		return `${this.baseReviewUrl}/q/<num>`;
+	}
+
 	private _autolinks: (AutolinkReference | DynamicAutolinkReference)[] | undefined;
 	override get autolinks(): (AutolinkReference | DynamicAutolinkReference)[] {
 		if (this._autolinks === undefined) {
 			this._autolinks = [
+				...super.autolinks,
 				{
 					prefix: 'Change-Id: ',
-					url: `${this.baseReviewUrl}/q/<num>`,
-					title: `Open Change #<num> on ${this.name}`,
+					url: this.issueLinkPattern,
 					alphanumeric: true,
+					ignoreCase: true,
+					title: `Open Change #<num> on ${this.name}`,
+
+					description: `${this.name} Change #<num>`,
 				},
 			];
 		}
@@ -51,8 +60,12 @@ export class GerritRemote extends RemoteProvider {
 		return 'gerrit';
 	}
 
-	get id() {
+	get id(): RemoteProviderId {
 		return 'gerrit';
+	}
+
+	get gkProviderId(): GkProviderId | undefined {
+		return undefined; // TODO@eamodio DRAFTS add this when supported by backend
 	}
 
 	get name() {
@@ -95,15 +108,15 @@ export class GerritRemote extends RemoteProvider {
 		let index = path.indexOf('/', 1);
 		if (index !== -1) {
 			const sha = path.substring(1, index);
-			if (GitRevision.isSha(sha) || sha == 'HEAD') {
-				const uri = repository.toAbsoluteUri(path.substr(index), { validate: options?.validate });
+			if (isSha(sha) || sha === 'HEAD') {
+				const uri = repository.toAbsoluteUri(path.substring(index), { validate: options?.validate });
 				if (uri != null) return { uri: uri, startLine: startLine };
 			}
 		}
 
 		// Check for a link with branch (and deal with branch names with /)
 		if (path.startsWith('/refs/heads/')) {
-			const branchPath = path.substr('/refs/heads/'.length);
+			const branchPath = path.substring('/refs/heads/'.length);
 
 			let branch;
 			const possibleBranches = new Map<string, string>();
@@ -112,11 +125,11 @@ export class GerritRemote extends RemoteProvider {
 				index = branchPath.lastIndexOf('/', index - 1);
 				branch = branchPath.substring(1, index);
 
-				possibleBranches.set(branch, branchPath.substr(index));
+				possibleBranches.set(branch, branchPath.substring(index));
 			} while (index > 0);
 
 			if (possibleBranches.size !== 0) {
-				const { values: branches } = await repository.getBranches({
+				const { values: branches } = await repository.git.branches().getBranches({
 					filter: b => b.remote && possibleBranches.has(b.getNameWithoutRemote()),
 				});
 				for (const branch of branches) {
@@ -133,7 +146,7 @@ export class GerritRemote extends RemoteProvider {
 
 		// Check for a link with tag (and deal with tag names with /)
 		if (path.startsWith('/refs/tags/')) {
-			const tagPath = path.substr('/refs/tags/'.length);
+			const tagPath = path.substring('/refs/tags/'.length);
 
 			let tag;
 			const possibleTags = new Map<string, string>();
@@ -142,11 +155,11 @@ export class GerritRemote extends RemoteProvider {
 				index = tagPath.lastIndexOf('/', index - 1);
 				tag = tagPath.substring(1, index);
 
-				possibleTags.set(tag, tagPath.substr(index));
+				possibleTags.set(tag, tagPath.substring(index));
 			} while (index > 0);
 
 			if (possibleTags.size !== 0) {
-				const { values: tags } = await repository.getTags({
+				const { values: tags } = await repository.git.tags().getTags({
 					filter: t => possibleTags.has(t.name),
 				});
 				for (const tag of tags) {

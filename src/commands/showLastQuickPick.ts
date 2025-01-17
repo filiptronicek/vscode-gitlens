@@ -1,15 +1,15 @@
 import { commands } from 'vscode';
-import { Commands } from '../constants';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { Logger } from '../logger';
-import { Messages } from '../messages';
-import { command } from '../system/command';
-import { Command, getLastCommand } from './base';
+import { showGenericErrorMessage } from '../messages';
+import { Logger } from '../system/logger';
+import { command } from '../system/vscode/command';
+import { getLastCommand, GlCommandBase } from './base';
 
 @command()
-export class ShowLastQuickPickCommand extends Command {
+export class ShowLastQuickPickCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(Commands.ShowLastQuickPick);
+		super(GlCommand.ShowLastQuickPick);
 	}
 
 	execute() {
@@ -20,7 +20,7 @@ export class ShowLastQuickPickCommand extends Command {
 			return commands.executeCommand(command.command, ...command.args);
 		} catch (ex) {
 			Logger.error(ex, 'ShowLastQuickPickCommand');
-			return Messages.showGenericErrorMessage('Unable to show last quick pick');
+			return showGenericErrorMessage('Unable to show last quick pick');
 		}
 	}
 }
